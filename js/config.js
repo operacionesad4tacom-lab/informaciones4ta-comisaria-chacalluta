@@ -6,8 +6,8 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
 // ✅ CREDENCIALES DE SUPABASE (CONFIGURADAS)
-const SUPABASE_URL = 'https://viltwtowftdnedxfjixu.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZpbHR3dG93ZnRkbmVkeGZqaXh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExMjcwMTksImV4cCI6MjA4NjcwMzAxOX0.fGd2k5hDVUvlx1bhWJ_L2Ib5hqbbzl5iDhJRN03fap8';
+const SUPABASE_URL = 'https://bpjepxcryqdwnmdedcse.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwamVweGNyeXFkd25tZGVkY3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExNTgxNjQsImV4cCI6MjA4NjczNDE2NH0.nF-vKdAqQdIWX2inyottEeN3hiSkaSOq9lqc5DG118s';
 
 // ✅ CREDENCIALES DE CLOUDINARY (CONFIGURADAS)
 const CLOUDINARY_CLOUD_NAME = 'dw61kjdzf';
