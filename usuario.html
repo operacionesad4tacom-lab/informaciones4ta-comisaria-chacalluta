@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Usuario - Carabineros Intranet</title>
+  
+  <link rel="stylesheet" href="css/colors.css">
+  <link rel="stylesheet" href="css/styles.css">
+  
+  <style>
+    body {
+      background: #fafafa;
+      padding-bottom: 80px;
+    }
+
+    .header {
+      background: linear-gradient(135deg, var(--verde-oscuro) 0%, var(--verde-medio) 100%);
+      padding: 20px;
+      color: white;
+      box-shadow: var(--sombra-md);
+    }
+
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .profile-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .profile-pic {
+      width: 50px;
+      height: 50px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      border: 2px solid white;
+    }
+
+    .user-details h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .user-details p {
+      margin: 0;
+      font-size: 13px;
+      opacity: 0.9;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      width: 40px;
+      height: 40px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border: none;
+      font-size: 20px;
+      color: white;
+      transition: all 0.2s;
+    }
+
+    .icon-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    .hero-service {
+      background: white;
+      margin: 20px;
+      padding: 24px;
+      border-radius: var(--radio-xl);
+      box-shadow: var(--sombra-md);
+      text-align: center;
+    }
+
+    .service-label {
+      font-size: 12px;
+      color: var(--gris-600);
+      font-weight: 600;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .service-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--verde-oscuro);
+      margin-bottom: 8px;
+    }
+
+    .service-time {
+      font-size: 16px;
+      color: var(--gris-700);
+    }
+
+    .timeline {
+      padding: 0 20px;
+      margin-top: 24px;
+    }
+
+    .priority-section {
+      margin-bottom: 32px;
+    }
+
+    .priority-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .priority-line {
+      width: 4px;
+      height: 24px;
+      border-radius: 2px;
+    }
+
+    .priority-line.urgente {
+      background: linear-gradient(180deg, var(--urgente) 0%, #ef4444 100%);
+    }
+
+    .priority-line.importante {
+      background: linear-gradient(180deg, var(--importante) 0%, #fbbf24 100%);
+    }
+
+    .priority-line.normal {
+      background: linear-gradient(180deg, var(--normal) 0%, #60a5fa 100%);
+    }
+
+    .priority-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--gris-900);
+    }
+
+    .timeline-item {
+      position: relative;
+      padding-left: 24px;
+      margin-bottom: 16px;
+    }
+
+    .timeline-item::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: -16px;
+      width: 2px;
+      background: var(--gris-200);
+    }
+
+    .timeline-item:last-child::before {
+      display: none;
+    }
+
+    .timeline-dot {
+      position: absolute;
+      left: -4px;
+      top: 8px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 2px solid white;
+      box-shadow: 0 0 0 2px var(--gris-200);
+    }
+
+    .timeline-dot.urgente {
+      background: var(--urgente);
+      box-shadow: 0 0 0 2px var(--urgente), 0 0 12px rgba(239, 68, 68, 0.5);
+      animation: pulse-dot 2s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+    }
+
+    .timeline-dot.importante {
+      background: var(--importante);
+      box-shadow: 0 0 0 2px var(--importante);
+    }
+
+    .timeline-dot.normal {
+      background: var(--normal);
+    }
+
+    .post-card {
+      background: white;
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: var(--sombra-sm);
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+
+    .post-card:hover {
+      box-shadow: var(--sombra-md);
+      transform: translateY(-2px);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 8px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--gris-900);
+      line-height: 1.4;
+      flex: 1;
+    }
+
+    .card-icon {
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+
+    .card-content {
+      font-size: 14px;
+      color: var(--gris-600);
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+
+    .card-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--gris-500);
+    }
+
+    .attachment-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--verde-claro);
+      color: var(--verde-oscuro);
+      border-radius: var(--radio-sm);
+      font-size: 13px;
+      text-decoration: none;
+      margin-top: 8px;
+    }
+
+    .attachment-link:hover {
+      background: var(--verde-pastel-1);
+    }
+
+    /* Modal de post */
+    .post-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+
+    .post-modal-content {
+      background: white;
+      border-radius: var(--radio-xl);
+      padding: 32px;
+      max-width: 600px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .post-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 20px;
+    }
+
+    .close-post-modal {
+      background: none;
+      border: none;
+      font-size: 28px;
+      cursor: pointer;
+      color: var(--gris-600);
+      line-height: 1;
+    }
+
+    @media (max-width: 768px) {
+      .user-details h2 {
+        font-size: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-content">
+      <div class="profile-info">
+        <div class="profile-pic" id="user-avatar">👤</div>
+        <div class="user-details">
+          <h2 id="user-name">Cargando...</h2>
+          <p id="user-rank">...</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="logout-btn">🚪</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Servicio actual -->
+  <div class="hero-service" id="current-service">
+    <div class="service-label">SERVICIO ACTUAL</div>
+    <div class="service-title">Cargando...</div>
+    <div class="service-time">...</div>
+  </div>
+
+  <!-- Timeline de posts -->
+  <div class="timeline" id="feed-posts">
+    <!-- Se llena dinámicamente -->
+  </div>
+
+  <!-- Modal de post -->
+  <div id="post-modal" class="post-modal hidden">
+    <div class="post-modal-content">
+      <div class="post-modal-header">
+        <h2 id="modal-title"></h2>
+        <button class="close-post-modal">×</button>
+      </div>
+      <div id="modal-content"></div>
+      <div id="modal-attachment"></div>
+      <div id="modal-meta"></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/usuario.js"></script>
+</body>
+</html>
