@@ -489,9 +489,17 @@ async function readExcelFile(file) {
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
+        const workbook = XLSX.read(data, { 
+          type: 'array',
+          cellDates: false, // Mantener números seriales de Excel
+          raw: true // Preservar valores raw sin conversión
+        });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { 
+          header: 1,
+          raw: true, // No convertir automáticamente
+          defval: null // Valor por defecto para celdas vacías
+        });
         
         resolve(parseExcelData(jsonData));
       } catch (error) {
@@ -502,6 +510,49 @@ async function readExcelFile(file) {
     reader.onerror = reject;
     reader.readAsArrayBuffer(file);
   });
+}
+
+// Función helper para convertir números seriales de Excel a fechas
+function excelSerialToDate(serial) {
+  // Si ya es una fecha válida en formato string, retornarla
+  if (typeof serial === 'string' && serial.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    return serial;
+  }
+  
+  // Si es un número serial de Excel
+  if (typeof serial === 'number') {
+    // Excel usa 1900-01-01 como día 1 (pero tiene un bug: considera 1900 bisiesto)
+    const excelEpoch = new Date(1899, 11, 30); // 30 de diciembre de 1899
+    const date = new Date(excelEpoch.getTime() + serial * 86400000);
+    
+    // Formatear como YYYY-MM-DD
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Si es un objeto Date de JavaScript
+  if (serial instanceof Date) {
+    const year = serial.getFullYear();
+    const month = String(serial.getMonth() + 1).padStart(2, '0');
+    const day = String(serial.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Intentar parsear como string de fecha
+  if (typeof serial === 'string') {
+    const date = new Date(serial);
+    if (!isNaN(date.getTime())) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  }
+  
+  return null;
 }
 
 function parseExcelData(jsonData) {
@@ -525,8 +576,16 @@ function parseExcelData(jsonData) {
       const siglaCode = row[j];
       if (!siglaCode) continue;
       
-      const dateStr = headers[j];
-      if (!dateStr) continue;
+      const rawDate = headers[j];
+      if (!rawDate) continue;
+      
+      // Convertir fecha de Excel a formato YYYY-MM-DD
+      const dateStr = excelSerialToDate(rawDate);
+      
+      if (!dateStr) {
+        console.warn(`Fecha inválida en columna ${j}:`, rawDate);
+        continue;
+      }
       
       services.push({
         badge_number: badgeNumber,
