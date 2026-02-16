@@ -211,6 +211,125 @@ async function loadAllSiglas() {
 }
 
 // ============================================
+// GESTIÓN DE PUBLICACIONES
+// ============================================
+async function createPost(postData) {
+  try {
+    showLoading();
+
+    // Determinar si es publicación privada
+    const postType = document.querySelector('input[name="post_type"]:checked').value;
+    const isPrivate = postType === 'private';
+
+    // Subir archivo si existe
+    let attachmentUrl = null;
+    let attachmentName = null;
+    
+    if (selectedFile) {
+      const uploadResult = await uploadToCloudinary(selectedFile);
+      
+      if (uploadResult.error) {
+        throw new Error('Error al subir el archivo');
+      }
+      
+      attachmentUrl = uploadResult.url;
+      attachmentName = selectedFile.name;
+    }
+
+    // Crear el post
+    const { data: newPost, error: postError } = await supabase
+      .from('posts')
+      .insert({
+        ...postData,
+        created_by: currentUser.id,
+        attachment_url: attachmentUrl,
+        attachment_name: attachmentName,
+        is_private: isPrivate
+      })
+      .select()
+      .single();
+
+    if (postError) throw postError;
+
+    // Si es privado, crear las relaciones con destinatarios
+    if (isPrivate) {
+      const recipients = getSelectedRecipients();
+      
+      if (recipients.length === 0) {
+        throw new Error('Debes seleccionar al menos un destinatario');
+      }
+
+      const recipientRecords = recipients.map(userId => ({
+        post_id: newPost.id,
+        user_id: userId
+      }));
+
+      const { error: recipientError } = await supabase
+        .from('post_recipients')
+        .insert(recipientRecords);
+
+      if (recipientError) throw recipientError;
+    }
+
+    hideLoading();
+    showToast('Publicación creada exitosamente', 'success');
+    
+    // Resetear formulario
+    document.getElementById('post-form').reset();
+    selectedFile = null;
+    document.getElementById('file-preview').classList.remove('show');
+    
+    await loadAllPosts();
+    await loadStats();
+    closeModal('create-post-modal');
+
+  } catch (error) {
+    hideLoading();
+    console.error('Error creando post:', error);
+    showToast(error.message || 'Error al crear publicación', 'error');
+  }
+}
+
+async function deletePost(postId) {
+  if (!confirm('¿Estás seguro de eliminar esta publicación?')) return;
+
+  try {
+    showLoading();
+
+    // Primero eliminar los recipients si existen
+    await supabase
+      .from('post_recipients')
+      .delete()
+      .eq('post_id', postId);
+
+    // Luego eliminar las lecturas
+    await supabase
+      .from('post_reads')
+      .delete()
+      .eq('post_id', postId);
+
+    // Finalmente eliminar el post
+    const { error } = await supabase
+      .from('posts')
+      .delete()
+      .eq('id', postId);
+
+    if (error) throw error;
+
+    hideLoading();
+    showToast('Publicación eliminada', 'success');
+    
+    await loadAllPosts();
+    await loadStats();
+
+  } catch (error) {
+    hideLoading();
+    console.error('Error eliminando post:', error);
+    showToast('Error al eliminar publicación', 'error');
+  }
+}
+
+// ============================================
 // GESTIÓN DE SIGLAS
 // ============================================
 async function createSigla(siglaData) {
@@ -241,48 +360,13 @@ async function createSigla(siglaData) {
   }
 }
 
-async function editSigla(siglaId) {
-  try {
-    const { data, error } = await supabase
-      .from('service_codes')
-      .select('*')
-      .eq('id', siglaId)
-      .single();
-
-    if (error) throw error;
-
-    // Llenar formulario
-    document.getElementById('sigla-modal-title').textContent = 'Editar Sigla';
-    document.getElementById('sigla-id').value = data.id;
-    document.getElementById('sigla-code').value = data.code;
-    document.getElementById('sigla-code').disabled = true;
-    document.getElementById('sigla-name').value = data.name;
-    document.querySelector(`input[name="is_rest"][value="${data.is_rest}"]`).checked = true;
-    document.getElementById('sigla-start').value = data.start_time || '';
-    document.getElementById('sigla-end').value = data.end_time || '';
-    document.getElementById('sigla-color').value = data.color;
-    
-    selectedColor = data.color;
-    document.querySelectorAll('.color-option').forEach(opt => {
-      opt.classList.toggle('selected', opt.dataset.color === data.color);
-    });
-
-    toggleHorarioFields();
-    openModal('sigla-modal');
-
-  } catch (error) {
-    console.error('Error cargando sigla:', error);
-    showToast('Error al cargar sigla', 'error');
-  }
-}
-
-async function updateSigla(siglaId, updates) {
+async function updateSigla(siglaId, siglaData) {
   try {
     showLoading();
 
     const { error } = await supabase
       .from('service_codes')
-      .update(updates)
+      .update(siglaData)
       .eq('id', siglaId);
 
     if (error) throw error;
@@ -300,6 +384,49 @@ async function updateSigla(siglaId, updates) {
   }
 }
 
+async function editSigla(siglaId) {
+  try {
+    const { data, error } = await supabase
+      .from('service_codes')
+      .select('*')
+      .eq('id', siglaId)
+      .single();
+
+    if (error) throw error;
+
+    // Llenar formulario
+    document.getElementById('sigla-modal-title').textContent = 'Editar Sigla';
+    document.getElementById('sigla-id').value = data.id;
+    document.getElementById('sigla-code').value = data.code;
+    document.getElementById('sigla-code').disabled = true; // No permitir cambiar código
+    document.getElementById('sigla-name').value = data.name;
+    
+    // Marcar tipo de servicio
+    const isRestRadio = document.querySelector(`input[name="is_rest"][value="${data.is_rest}"]`);
+    if (isRestRadio) isRestRadio.checked = true;
+    
+    // Llenar horarios si no es descanso
+    if (!data.is_rest && data.start_time && data.end_time) {
+      document.getElementById('sigla-start').value = data.start_time;
+      document.getElementById('sigla-end').value = data.end_time;
+    }
+    
+    // Seleccionar color
+    selectedColor = data.color || '#2d8b4d';
+    document.getElementById('sigla-color').value = selectedColor;
+    document.querySelectorAll('.color-option').forEach(opt => {
+      opt.classList.toggle('selected', opt.dataset.color === selectedColor);
+    });
+    
+    toggleHorarioFields();
+    openModal('sigla-modal');
+
+  } catch (error) {
+    console.error('Error cargando sigla:', error);
+    showToast('Error al cargar sigla', 'error');
+  }
+}
+
 async function deleteSigla(siglaId) {
   if (!confirm('¿Estás seguro de eliminar esta sigla?')) return;
 
@@ -314,7 +441,7 @@ async function deleteSigla(siglaId) {
     if (error) throw error;
 
     hideLoading();
-    showToast('Sigla eliminada exitosamente', 'success');
+    showToast('Sigla eliminada', 'success');
     
     await loadAllSiglas();
     await loadStats();
@@ -327,7 +454,7 @@ async function deleteSigla(siglaId) {
 }
 
 // ============================================
-// EXCEL UPLOAD
+// CARGA MASIVA DESDE EXCEL
 // ============================================
 function setupExcelUpload() {
   const excelInput = document.getElementById('excel-input');
@@ -340,16 +467,11 @@ function setupExcelUpload() {
 
     try {
       showLoading();
-
-      const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data);
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-
-      excelData = parseExcelData(jsonData);
       
-      displayExcelPreview(excelData);
+      const data = await readExcelFile(file);
+      excelData = data;
       
+      displayExcelPreview(data);
       hideLoading();
 
     } catch (error) {
@@ -360,44 +482,61 @@ function setupExcelUpload() {
   });
 }
 
-function parseExcelData(rawData) {
-  // Formato esperado: Primera fila = headers (badge_number, fechas)
-  // Siguientes filas = badge_number, siglas por fecha
-  
-  const headers = rawData[0];
-  const dates = headers.slice(1); // Fechas en columnas 2+
-  
+async function readExcelFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+        
+        resolve(parseExcelData(jsonData));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function parseExcelData(jsonData) {
+  if (jsonData.length < 2) {
+    throw new Error('El archivo debe tener al menos 2 filas (encabezados + datos)');
+  }
+
+  const headers = jsonData[0];
   const services = [];
   
-  for (let i = 1; i < rawData.length; i++) {
-    const row = rawData[i];
-    const badgeNumber = row[0];
+  // Procesar cada fila (saltando encabezados)
+  for (let i = 1; i < jsonData.length; i++) {
+    const row = jsonData[i];
+    if (!row || row.length === 0) continue;
     
+    const badgeNumber = row[0];
     if (!badgeNumber) continue;
     
+    // Procesar cada columna de fecha (saltando la primera que es badge_number)
     for (let j = 1; j < row.length; j++) {
-      const sigla = row[j];
-      const date = dates[j - 1];
+      const siglaCode = row[j];
+      if (!siglaCode) continue;
       
-      if (sigla && date) {
-        services.push({
-          badge_number: badgeNumber,
-          date: formatExcelDate(date),
-          sigla: sigla.toString().toUpperCase()
-        });
-      }
+      const dateStr = headers[j];
+      if (!dateStr) continue;
+      
+      services.push({
+        badge_number: badgeNumber,
+        date: dateStr,
+        sigla_code: siglaCode
+      });
     }
   }
   
   return services;
-}
-
-function formatExcelDate(dateValue) {
-  if (typeof dateValue === 'number') {
-    const date = new Date((dateValue - 25569) * 86400 * 1000);
-    return date.toISOString().split('T')[0];
-  }
-  return dateValue;
 }
 
 function displayExcelPreview(data) {
@@ -405,43 +544,32 @@ function displayExcelPreview(data) {
   const summary = document.getElementById('excel-summary');
   const changes = document.getElementById('excel-changes');
   
-  const uniqueUsers = new Set(data.map(s => s.badge_number)).size;
-  const uniqueDates = new Set(data.map(s => s.date)).size;
+  if (!preview || !summary || !changes) return;
+  
+  preview.style.display = 'block';
   
   summary.innerHTML = `
-    <div class="alert alert-info">
-      <p><strong>📊 Resumen:</strong></p>
-      <p>• Total de servicios a cargar: ${data.length}</p>
-      <p>• Usuarios afectados: ${uniqueUsers}</p>
-      <p>• Días con servicios: ${uniqueDates}</p>
+    <div class="stat-card">
+      <div class="stat-value">${data.length}</div>
+      <div class="stat-label">Servicios a cargar</div>
     </div>
   `;
   
-  const sampleRows = data.slice(0, 10).map(s => `
-    <tr>
-      <td>${s.badge_number}</td>
-      <td>${s.date}</td>
-      <td><strong>${s.sigla}</strong></td>
-    </tr>
-  `).join('');
+  const uniqueUsers = [...new Set(data.map(s => s.badge_number))];
+  const uniqueDates = [...new Set(data.map(s => s.date))];
   
   changes.innerHTML = `
-    <h4>Vista previa (primeros 10 registros):</h4>
-    <table style="width: 100%; border-collapse: collapse;">
-      <thead>
-        <tr style="background: var(--gris-100);">
-          <th style="padding: 8px; text-align: left;">Badge</th>
-          <th style="padding: 8px; text-align: left;">Fecha</th>
-          <th style="padding: 8px; text-align: left;">Sigla</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${sampleRows}
-      </tbody>
-    </table>
+    <p><strong>👥 Usuarios afectados:</strong> ${uniqueUsers.length}</p>
+    <p><strong>📅 Rango de fechas:</strong> ${uniqueDates.length} días</p>
+    <div style="margin-top: 16px; max-height: 200px; overflow-y: auto; background: var(--gris-50); padding: 12px; border-radius: 8px;">
+      ${data.slice(0, 10).map(s => `
+        <div style="font-size: 13px; margin-bottom: 4px;">
+          ${s.badge_number} → ${s.date} → ${s.sigla_code}
+        </div>
+      `).join('')}
+      ${data.length > 10 ? `<p style="color: var(--gris-600); margin-top: 8px;">...y ${data.length - 10} más</p>` : ''}
+    </div>
   `;
-  
-  preview.style.display = 'block';
 }
 
 async function confirmExcelUpload() {
@@ -453,101 +581,110 @@ async function confirmExcelUpload() {
   try {
     showLoading();
 
-    // 1. Obtener todos los service_codes y profiles
-    const { data: serviceCodes } = await supabase
-      .from('service_codes')
-      .select('id, code');
-    
-    const { data: profiles } = await supabase
+    // Obtener todos los usuarios y siglas
+    const { data: users } = await supabase
       .from('profiles')
       .select('id, badge_number');
 
-    const codeMap = Object.fromEntries(serviceCodes.map(s => [s.code, s.id]));
-    const userMap = Object.fromEntries(profiles.map(p => [p.badge_number, p.id]));
+    const { data: siglas } = await supabase
+      .from('service_codes')
+      .select('id, code, name, start_time, end_time');
 
-    // 2. Preparar inserts con IDs correctos
-    const servicesInsert = [];
+    // Crear mapas para búsqueda rápida
+    const userMap = {};
+    users?.forEach(u => userMap[u.badge_number] = u.id);
+
+    const siglaMap = {};
+    siglas?.forEach(s => siglaMap[s.code] = s);
+
+    // Procesar servicios
+    const servicesToInsert = [];
     const errors = [];
 
-    for (const item of excelData) {
-      const serviceCodeId = codeMap[item.sigla];
-      const userId = userMap[item.badge_number];
-
-      if (!serviceCodeId) {
-        errors.push(`Sigla no encontrada: ${item.sigla}`);
-        continue;
-      }
+    for (const service of excelData) {
+      const userId = userMap[service.badge_number];
+      const sigla = siglaMap[service.sigla_code];
 
       if (!userId) {
-        errors.push(`Usuario no encontrado: ${item.badge_number}`);
+        errors.push(`Usuario no encontrado: ${service.badge_number}`);
         continue;
       }
 
-      servicesInsert.push({
+      if (!sigla) {
+        errors.push(`Sigla no encontrada: ${service.sigla_code}`);
+        continue;
+      }
+
+      servicesToInsert.push({
         user_id: userId,
-        service_code_id: serviceCodeId,
-        date: item.date,
-        service_type: item.sigla,
-        start_time: '08:00',
-        end_time: '20:00'
+        service_code_id: sigla.id,
+        date: service.date,
+        service_type: sigla.name,
+        start_time: sigla.start_time,
+        end_time: sigla.end_time
       });
     }
 
     if (errors.length > 0) {
-      console.warn('Errores durante la carga:', errors);
+      console.warn('Errores encontrados:', errors);
     }
 
-    // 3. Eliminar servicios existentes en las fechas afectadas
-    const uniqueDates = [...new Set(excelData.map(s => s.date))];
-    
-    await supabase
-      .from('services')
-      .delete()
-      .in('date', uniqueDates);
+    if (servicesToInsert.length === 0) {
+      throw new Error('No hay servicios válidos para insertar');
+    }
 
-    // 4. Insertar nuevos servicios
+    // Eliminar servicios existentes en las fechas afectadas
+    const dates = [...new Set(servicesToInsert.map(s => s.date))];
+    const userIds = [...new Set(servicesToInsert.map(s => s.user_id))];
+
+    for (const userId of userIds) {
+      await supabase
+        .from('services')
+        .delete()
+        .eq('user_id', userId)
+        .in('date', dates);
+    }
+
+    // Insertar nuevos servicios
     const { error } = await supabase
       .from('services')
-      .insert(servicesInsert);
+      .insert(servicesToInsert);
 
     if (error) throw error;
 
     hideLoading();
-    showToast(`✅ ${servicesInsert.length} servicios cargados exitosamente`, 'success');
+    showToast(`✅ ${servicesToInsert.length} servicios cargados exitosamente`, 'success');
     
-    if (errors.length > 0) {
-      showToast(`⚠️ ${errors.length} registros con errores`, 'error');
-    }
-
     closeModal('excel-modal');
+    document.getElementById('excel-preview').style.display = 'none';
+    document.getElementById('excel-input').value = '';
+    excelData = null;
+    
     await loadStats();
 
   } catch (error) {
     hideLoading();
-    console.error('Error cargando servicios:', error);
-    showToast('Error al cargar servicios', 'error');
+    console.error('Error en carga masiva:', error);
+    showToast('Error al cargar servicios: ' + error.message, 'error');
   }
 }
 
 // ============================================
-// CONFIGURAR CARGA DE ARCHIVOS
+// GESTIÓN DE ARCHIVOS
 // ============================================
 function setupFileUpload() {
-  const uploadArea = document.getElementById('file-upload-area');
   const fileInput = document.getElementById('file-input');
+  const uploadArea = document.getElementById('file-upload-area');
   const filePreview = document.getElementById('file-preview');
   const fileName = document.getElementById('file-name');
   const removeBtn = document.getElementById('remove-file-btn');
 
-  if (!uploadArea || !fileInput) return;
+  if (!fileInput || !uploadArea) return;
 
+  // Click en área para abrir selector
   uploadArea.addEventListener('click', () => fileInput.click());
 
-  fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) handleFileSelect(file);
-  });
-
+  // Drag & drop
   uploadArea.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadArea.classList.add('dragover');
@@ -560,160 +697,61 @@ function setupFileUpload() {
   uploadArea.addEventListener('drop', (e) => {
     e.preventDefault();
     uploadArea.classList.remove('dragover');
+    
     const file = e.dataTransfer.files[0];
     if (file) handleFileSelect(file);
   });
 
-  if (removeBtn) {
-    removeBtn.addEventListener('click', () => {
-      selectedFile = null;
-      fileInput.value = '';
-      filePreview.classList.remove('show');
-    });
-  }
+  // Selección de archivo
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) handleFileSelect(file);
+  });
+
+  // Remover archivo
+  removeBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selectedFile = null;
+    fileInput.value = '';
+    filePreview.classList.remove('show');
+  });
 
   function handleFileSelect(file) {
-    if (file.size > 10 * 1024 * 1024) {
-      showToast('El archivo es muy grande. Máximo 10MB', 'error');
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    
+    if (file.size > maxSize) {
+      showToast('El archivo es demasiado grande (máx. 10MB)', 'error');
       return;
     }
 
     selectedFile = file;
-    fileName.textContent = `📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    fileName.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
     filePreview.classList.add('show');
   }
 }
 
 // ============================================
-// CREAR POST
+// CARGAR USUARIOS PARA SELECTOR
 // ============================================
-async function createPost(postData) {
-  try {
-    showLoading();
-
-    let attachmentUrl = null;
-    let attachmentName = null;
-
-    if (selectedFile) {
-      const uploadResult = await uploadToCloudinary(selectedFile);
-      
-      if (uploadResult.error) {
-        throw new Error('Error al subir archivo');
-      }
-
-      attachmentUrl = uploadResult.url;
-      attachmentName = selectedFile.name;
-    }
-
-    // Obtener tipo de publicación
-    const postType = document.querySelector('input[name="post_type"]:checked').value;
-    const isPrivate = postType === 'private';
-
-    // Insertar post
-    const { data: newPost, error } = await supabase
-      .from('posts')
-      .insert({
-        ...postData,
-        created_by: currentUser.id,
-        attachment_url: attachmentUrl,
-        attachment_name: attachmentName,
-        is_private: isPrivate
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    // Si es privada, insertar destinatarios
-    if (isPrivate) {
-      const recipients = getSelectedRecipients();
-      if (recipients.length === 0) {
-        throw new Error('Debes seleccionar al menos un destinatario para publicaciones privadas');
-      }
-
-      const recipientsData = recipients.map(recipientId => ({
-        post_id: newPost.id,
-        recipient_id: recipientId
-      }));
-
-      const { error: recipientsError } = await supabase
-        .from('post_recipients')
-        .insert(recipientsData);
-
-      if (recipientsError) throw recipientsError;
-    }
-
-    hideLoading();
-    showToast('Publicación creada exitosamente', 'success');
-    
-    await loadAllPosts();
-    await loadStats();
-    
-    document.getElementById('post-form').reset();
-    document.getElementById('file-preview').classList.remove('show');
-    selectedFile = null;
-    closeModal('create-post-modal');
-
-  } catch (error) {
-    hideLoading();
-    console.error('Error creando post:', error);
-    showToast(error.message || 'Error al crear publicación', 'error');
-  }
-}
-
-// ============================================
-// ELIMINAR POST
-// ============================================
-async function deletePost(postId) {
-  if (!confirm('¿Estás seguro de eliminar esta publicación?')) return;
-
-  try {
-    showLoading();
-
-    const { error } = await supabase
-      .from('posts')
-      .delete()
-      .eq('id', postId);
-
-    if (error) throw error;
-
-    hideLoading();
-    showToast('Publicación eliminada', 'success');
-    
-    await loadAllPosts();
-    await loadStats();
-
-  } catch (error) {
-    hideLoading();
-    console.error('Error eliminando post:', error);
-    showToast('Error al eliminar', 'error');
-  }
-}
-
-// ============================================
-// FUNCIONES DE PUBLICACIONES PRIVADAS v2.0
-// ============================================
-
-// Cargar usuarios para selector
 async function loadAllUsers() {
   try {
     const users = await getAllUsers();
-    
     const container = document.getElementById('users-list-container');
-    if (!users || users.length === 0) {
-      container.innerHTML = '<p style="color: var(--gris-500);">No hay usuarios disponibles</p>';
+    
+    if (!container) return;
+    
+    if (users.length === 0) {
+      container.innerHTML = '<p style="color: var(--gris-500); text-align: center;">No hay usuarios disponibles</p>';
       return;
     }
 
     container.innerHTML = users.map(user => `
-      <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 8px; transition: background 0.2s;" 
-             onmouseover="this.style.background='var(--gris-100)'" 
+      <label style="display: block; padding: 8px; cursor: pointer; border-radius: 8px; transition: background 0.2s;" 
+             onmouseover="this.style.background='var(--gris-50)'" 
              onmouseout="this.style.background='transparent'">
-        <input type="checkbox" value="${user.id}" class="recipient-checkbox" style="margin-right: 12px; width: auto;">
-        <div>
-          <div style="font-weight: 600; color: var(--gris-900);">${user.full_name}</div>
-          <div style="font-size: 12px; color: var(--gris-600);">${user.rank || 'Funcionario'} - Placa: ${user.badge_number}</div>
-        </div>
+        <input type="checkbox" class="recipient-checkbox" value="${user.id}" 
+               style="width: auto; margin-right: 12px;">
+        <strong>${user.full_name}</strong> - ${user.rank || 'Funcionario'} (${user.badge_number})
       </label>
     `).join('');
 
