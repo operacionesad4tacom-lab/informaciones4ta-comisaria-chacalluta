@@ -1,5 +1,6 @@
 /**
- * PANEL DE ADMINISTRADOR - VERSIÓN COMPLETA
+ * PANEL DE ADMINISTRADOR - VERSIÓN COMPLETA v2.0
+ * Incluye: Publicaciones privadas, destinatarios, estadísticas de lectura
  */
 
 import { 
@@ -10,7 +11,9 @@ import {
   showLoading,
   hideLoading,
   formatDateShort,
-  uploadToCloudinary
+  uploadToCloudinary,
+  getAllUsers,
+  getPostReadStats
 } from './config.js';
 
 import { logout, checkSession } from './auth.js';
@@ -20,6 +23,7 @@ let currentProfile = null;
 let selectedFile = null;
 let excelData = null;
 let selectedColor = '#2d8b4d';
+let selectedRecipients = [];
 
 // ============================================
 // INICIALIZACIÓN
@@ -110,30 +114,39 @@ async function loadAllPosts() {
       return;
     }
 
-    postsContainer.innerHTML = data.map(post => `
-      <div class="admin-post-card">
-        <div class="post-header">
-          <div>
-            <h4>${post.title}</h4>
-            <span class="badge badge-${post.priority}">${post.priority}</span>
-            <span class="badge badge-normal">${post.category}</span>
+    postsContainer.innerHTML = data.map(post => {
+      const isPrivate = post.is_private;
+      const privacyBadge = isPrivate 
+        ? `<span class="badge" style="background: var(--importante-bg); color: #92400e;">🔒 Privada</span>`
+        : `<span class="badge" style="background: var(--normal-bg); color: var(--normal);">📢 Pública</span>`;
+      
+      return `
+        <div class="admin-post-card">
+          <div class="post-header">
+            <div>
+              <h4>${post.title}</h4>
+              <span class="badge badge-${post.priority}">${post.priority}</span>
+              <span class="badge badge-normal">${post.category}</span>
+              ${privacyBadge}
+            </div>
+            <div class="post-actions">
+              ${isPrivate ? `<button class="btn-sm btn-secondary" onclick="showPostReadStats('${post.id}')">📊 Ver stats</button>` : ''}
+              <button class="btn-sm btn-danger delete-post-btn" data-id="${post.id}">🗑️ Eliminar</button>
+            </div>
           </div>
-          <div class="post-actions">
-            <button class="btn-sm btn-danger delete-post-btn" data-id="${post.id}">🗑️ Eliminar</button>
+          <p>${post.content.substring(0, 200)}${post.content.length > 200 ? '...' : ''}</p>
+          ${post.attachment_url ? `
+            <a href="${post.attachment_url}" target="_blank" class="attachment-link">
+              📎 ${post.attachment_name || 'Ver archivo adjunto'}
+            </a>
+          ` : ''}
+          <div class="post-meta">
+            <span>👤 ${post.profiles?.full_name || 'Admin'}</span>
+            <span>📅 ${formatDateShort(post.created_at)}</span>
           </div>
         </div>
-        <p>${post.content.substring(0, 200)}${post.content.length > 200 ? '...' : ''}</p>
-        ${post.attachment_url ? `
-          <a href="${post.attachment_url}" target="_blank" class="attachment-link">
-            📎 ${post.attachment_name || 'Ver archivo adjunto'}
-          </a>
-        ` : ''}
-        <div class="post-meta">
-          <span>👤 ${post.profiles?.full_name || 'Admin'}</span>
-          <span>📅 ${formatDateShort(post.created_at)}</span>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     document.querySelectorAll('.delete-post-btn').forEach(btn => {
       btn.addEventListener('click', () => deletePost(btn.dataset.id));
@@ -470,9 +483,6 @@ async function confirmExcelUpload() {
         continue;
       }
 
-      // Buscar info de la sigla para completar datos
-      const siglaInfo = serviceCodes.find(s => s.id === serviceCodeId);
-      
       servicesInsert.push({
         user_id: userId,
         service_code_id: serviceCodeId,
@@ -595,16 +605,43 @@ async function createPost(postData) {
       attachmentName = selectedFile.name;
     }
 
-    const { error } = await supabase
+    // Obtener tipo de publicación
+    const postType = document.querySelector('input[name="post_type"]:checked').value;
+    const isPrivate = postType === 'private';
+
+    // Insertar post
+    const { data: newPost, error } = await supabase
       .from('posts')
       .insert({
         ...postData,
         created_by: currentUser.id,
         attachment_url: attachmentUrl,
-        attachment_name: attachmentName
-      });
+        attachment_name: attachmentName,
+        is_private: isPrivate
+      })
+      .select()
+      .single();
 
     if (error) throw error;
+
+    // Si es privada, insertar destinatarios
+    if (isPrivate) {
+      const recipients = getSelectedRecipients();
+      if (recipients.length === 0) {
+        throw new Error('Debes seleccionar al menos un destinatario para publicaciones privadas');
+      }
+
+      const recipientsData = recipients.map(recipientId => ({
+        post_id: newPost.id,
+        recipient_id: recipientId
+      }));
+
+      const { error: recipientsError } = await supabase
+        .from('post_recipients')
+        .insert(recipientsData);
+
+      if (recipientsError) throw recipientsError;
+    }
 
     hideLoading();
     showToast('Publicación creada exitosamente', 'success');
@@ -620,7 +657,7 @@ async function createPost(postData) {
   } catch (error) {
     hideLoading();
     console.error('Error creando post:', error);
-    showToast('Error al crear publicación', 'error');
+    showToast(error.message || 'Error al crear publicación', 'error');
   }
 }
 
@@ -652,6 +689,143 @@ async function deletePost(postId) {
     showToast('Error al eliminar', 'error');
   }
 }
+
+// ============================================
+// FUNCIONES DE PUBLICACIONES PRIVADAS v2.0
+// ============================================
+
+// Cargar usuarios para selector
+async function loadAllUsers() {
+  try {
+    const users = await getAllUsers();
+    
+    const container = document.getElementById('users-list-container');
+    if (!users || users.length === 0) {
+      container.innerHTML = '<p style="color: var(--gris-500);">No hay usuarios disponibles</p>';
+      return;
+    }
+
+    container.innerHTML = users.map(user => `
+      <label style="display: flex; align-items: center; padding: 8px; cursor: pointer; border-radius: 8px; transition: background 0.2s;" 
+             onmouseover="this.style.background='var(--gris-100)'" 
+             onmouseout="this.style.background='transparent'">
+        <input type="checkbox" value="${user.id}" class="recipient-checkbox" style="margin-right: 12px; width: auto;">
+        <div>
+          <div style="font-weight: 600; color: var(--gris-900);">${user.full_name}</div>
+          <div style="font-size: 12px; color: var(--gris-600);">${user.rank || 'Funcionario'} - Placa: ${user.badge_number}</div>
+        </div>
+      </label>
+    `).join('');
+
+    // Event listener para contar seleccionados
+    document.querySelectorAll('.recipient-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('change', updateRecipientsCount);
+    });
+  } catch (error) {
+    console.error('Error cargando usuarios:', error);
+  }
+}
+
+// Actualizar contador de destinatarios
+function updateRecipientsCount() {
+  const selected = document.querySelectorAll('.recipient-checkbox:checked').length;
+  const label = document.querySelector('label[for="recipients"]');
+  if (label) {
+    label.textContent = `Destinatarios * (${selected} seleccionado${selected !== 1 ? 's' : ''})`;
+  }
+}
+
+// Obtener destinatarios seleccionados
+function getSelectedRecipients() {
+  const checkboxes = document.querySelectorAll('.recipient-checkbox:checked');
+  return Array.from(checkboxes).map(cb => cb.value);
+}
+
+// Toggle visibility de selector de destinatarios
+window.toggleRecipients = function() {
+  const postType = document.querySelector('input[name="post_type"]:checked').value;
+  const recipientsSelector = document.getElementById('recipients-selector');
+  
+  if (postType === 'private') {
+    recipientsSelector.style.display = 'block';
+    loadAllUsers(); // Cargar usuarios cuando se activa
+  } else {
+    recipientsSelector.style.display = 'none';
+  }
+};
+
+// Mostrar estadísticas de lectura
+window.showPostReadStats = async function(postId) {
+  try {
+    showLoading();
+
+    const stats = await getPostReadStats(postId);
+    
+    if (!stats) {
+      showToast('No hay estadísticas disponibles', 'info');
+      hideLoading();
+      return;
+    }
+
+    // Obtener lista de usuarios que leyeron
+    const { data: reads } = await supabase
+      .from('post_reads')
+      .select(`
+        read_at,
+        profiles:user_id (full_name, rank)
+      `)
+      .eq('post_id', postId)
+      .order('read_at', { ascending: false });
+
+    hideLoading();
+
+    // Crear modal de stats
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.zIndex = '1001';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>📊 Estadísticas de Lectura</h2>
+          <button class="close-modal-btn" onclick="this.closest('.modal').remove()">✕</button>
+        </div>
+        <div>
+          <h3>${stats.title}</h3>
+          <div style="margin: 20px 0;">
+            <div class="stat-card" style="margin-bottom: 16px;">
+              <div class="stat-value">${stats.total_reads} / ${stats.total_recipients}</div>
+              <div class="stat-label">Lecturas completadas</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value">${stats.read_percentage || 0}%</div>
+              <div class="stat-label">Porcentaje de lectura</div>
+            </div>
+          </div>
+
+          ${reads && reads.length > 0 ? `
+            <h4>Han leído (${reads.length}):</h4>
+            <div style="max-height: 300px; overflow-y: auto;">
+              ${reads.map(r => `
+                <div style="padding: 12px; border-bottom: 1px solid var(--gris-200);">
+                  <div style="font-weight: 600;">${r.profiles?.full_name || 'Usuario'}</div>
+                  <div style="font-size: 13px; color: var(--gris-600);">
+                    ${r.profiles?.rank || ''} • ${formatDateShort(r.read_at)}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : '<p style="color: var(--gris-500);">Nadie ha leído aún esta publicación</p>'}
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+  } catch (error) {
+    hideLoading();
+    console.error('Error mostrando stats:', error);
+    showToast('Error al cargar estadísticas', 'error');
+  }
+};
 
 // ============================================
 // MODALS
@@ -700,8 +874,9 @@ function setupEventListeners() {
     });
   });
 
-  // Crear post
+  // Crear post - con carga de usuarios
   document.getElementById('create-post-btn')?.addEventListener('click', () => {
+    loadAllUsers();
     openModal('create-post-modal');
   });
 
