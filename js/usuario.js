@@ -83,7 +83,10 @@ async function loadCurrentService() {
     
     const { data, error } = await supabase
       .from('services')
-      .select('*')
+      .select(`
+        *,
+        service_codes:service_code_id (code, name, color)
+      `)
       .eq('user_id', currentUser.id)
       .eq('date', today)
       .single();
@@ -96,9 +99,12 @@ async function loadCurrentService() {
       // Marcar como leído
       markServiceAsRead(data.id);
       
+      const serviceName = data.service_codes?.name || data.service_type;
+      const serviceCode = data.service_codes?.code || '';
+      
       serviceContainer.innerHTML = `
         <div class="service-label">SERVICIO ACTUAL</div>
-        <div class="service-title">${data.service_type}</div>
+        <div class="service-title">${serviceCode ? `${serviceCode} - ` : ''}${serviceName}</div>
         <div class="service-time">${data.start_time} - ${data.end_time}</div>
         ${data.location ? `<p style="margin-top: 8px; color: var(--gris-600);">📍 ${data.location}</p>` : ''}
       `;
@@ -119,21 +125,49 @@ async function loadCurrentService() {
 // ============================================
 async function loadPosts() {
   try {
-    const { data, error } = await supabase
+    // Primero obtener posts públicos
+    const { data: publicPosts, error: publicError } = await supabase
       .from('posts')
       .select(`
         *,
         profiles:created_by (full_name, rank)
       `)
       .eq('is_active', true)
-      .order('created_at', { ascending: false })
-      .limit(20);
+      .eq('is_private', false)
+      .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (publicError) throw publicError;
+
+    // Luego obtener posts privados donde el usuario es destinatario
+    const { data: privatePosts, error: privateError } = await supabase
+      .from('posts')
+      .select(`
+        *,
+        profiles:created_by (full_name, rank)
+      `)
+      .eq('is_active', true)
+      .eq('is_private', true)
+      .in('id', 
+        // Subconsulta para obtener los IDs de posts donde el usuario es destinatario
+        await supabase
+          .from('post_recipients')
+          .select('post_id')
+          .eq('user_id', currentUser.id)
+          .then(({ data }) => data?.map(r => r.post_id) || [])
+      )
+      .order('created_at', { ascending: false });
+
+    if (privateError && privateError.code !== 'PGRST116') throw privateError;
+
+    // Combinar ambos arrays
+    const allPosts = [...(publicPosts || []), ...(privatePosts || [])];
+    
+    // Ordenar por fecha
+    allPosts.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     const feedContainer = document.getElementById('feed-posts');
     
-    if (!data || data.length === 0) {
+    if (!allPosts || allPosts.length === 0) {
       feedContainer.innerHTML = '<p class="text-center" style="color: var(--gris-500); padding: 40px;">No hay publicaciones disponibles</p>';
       return;
     }
@@ -142,9 +176,9 @@ async function loadPosts() {
 
     // Agrupar por prioridad
     const priorities = {
-      urgente: data.filter(p => p.priority === 'urgente'),
-      importante: data.filter(p => p.priority === 'importante'),
-      normal: data.filter(p => p.priority === 'normal')
+      urgente: allPosts.filter(p => p.priority === 'urgente'),
+      importante: allPosts.filter(p => p.priority === 'importante'),
+      normal: allPosts.filter(p => p.priority === 'normal')
     };
 
     // Renderizar urgente
@@ -192,7 +226,7 @@ async function loadPosts() {
     document.querySelectorAll('.post-card').forEach(card => {
       card.addEventListener('click', () => {
         const postId = card.dataset.postId;
-        const post = data.find(p => p.id === postId);
+        const post = allPosts.find(p => p.id === postId);
         if (post) openPostModal(post);
       });
     });
@@ -264,16 +298,18 @@ function getCategoryIcon(category) {
 function openPostModal(post) {
   // Marcar como leído
   markPostAsRead(post.id);
-  
+
   const modal = document.getElementById('post-modal');
   const modalTitle = document.getElementById('modal-title');
   const modalContent = document.getElementById('modal-content');
   const modalAttachment = document.getElementById('modal-attachment');
   const modalMeta = document.getElementById('modal-meta');
 
+  if (!modal || !modalTitle || !modalContent) return;
+
   modalTitle.textContent = post.title;
-  modalContent.innerHTML = `<p style="color: var(--gris-700); line-height: 1.6; white-space: pre-wrap;">${post.content}</p>`;
-  
+  modalContent.innerHTML = `<p style="white-space: pre-line; line-height: 1.6;">${post.content}</p>`;
+
   if (post.attachment_url) {
     modalAttachment.innerHTML = `
       <a href="${post.attachment_url}" target="_blank" class="btn btn-primary" style="margin-top: 20px; display: inline-flex; align-items: center; gap: 8px;">
@@ -344,7 +380,7 @@ function renderCalendar(year, month) {
   ];
   
   // Actualizar label del mes
-  const label = document.getElementById('current-month-label');
+  const label = document.getElementById('current-month-year');
   if (label) label.textContent = `${monthNames[month]} ${year}`;
   
   const firstDay = new Date(year, month, 1);
@@ -352,14 +388,22 @@ function renderCalendar(year, month) {
   const startingDayOfWeek = firstDay.getDay();
   const totalDays = lastDay.getDate();
   
-  const calendarDays = document.getElementById('calendar-days');
-  if (!calendarDays) return;
+  // Obtener el grid del calendario (después de los headers)
+  const calendarGrid = document.getElementById('calendar-grid');
+  if (!calendarGrid) return;
   
-  let html = '';
+  // Guardar los headers de días de la semana
+  const dayHeaders = Array.from(calendarGrid.children).slice(0, 7);
+  
+  // Limpiar todo excepto los headers
+  calendarGrid.innerHTML = '';
+  dayHeaders.forEach(header => calendarGrid.appendChild(header));
   
   // Días vacíos al inicio
   for (let i = 0; i < startingDayOfWeek; i++) {
-    html += '<div class="calendar-day empty"></div>';
+    const emptyDay = document.createElement('div');
+    emptyDay.className = 'calendar-day other-month';
+    calendarGrid.appendChild(emptyDay);
   }
   
   // Días del mes
@@ -371,22 +415,23 @@ function renderCalendar(year, month) {
     const service = servicesCache[dateStr];
     const isToday = dateStr === today;
     
-    const serviceCode = service?.service_codes?.code || service?.service_type || '';
-    const serviceColor = service?.service_codes?.color || '#9ca3af';
+    const dayElement = document.createElement('div');
+    let className = 'calendar-day';
     
-    html += `
-      <div class="calendar-day ${isToday ? 'today' : ''}" ${service ? `onclick="showServiceDetail('${dateStr}')"` : ''}>
-        <div class="day-number">${day}</div>
-        ${service ? `
-          <div class="service-badge" style="background: ${serviceColor};">
-            ${serviceCode}
-          </div>
-        ` : ''}
-      </div>
-    `;
+    if (isToday) className += ' today';
+    if (service) className += ' has-service';
+    
+    dayElement.className = className;
+    dayElement.textContent = day;
+    
+    if (service) {
+      dayElement.style.borderColor = service.service_codes?.color || '#2d8b4d';
+      dayElement.onclick = () => showServiceDetail(dateStr);
+      dayElement.style.cursor = 'pointer';
+    }
+    
+    calendarGrid.appendChild(dayElement);
   }
-  
-  calendarDays.innerHTML = html;
 }
 
 // Navegar entre meses
@@ -405,7 +450,7 @@ function navigateMonth(direction) {
 }
 
 // Mostrar detalle de servicio
-window.showServiceDetail = function(dateStr) {
+function showServiceDetail(dateStr) {
   const service = servicesCache[dateStr];
   if (!service) return;
   
@@ -420,20 +465,30 @@ window.showServiceDetail = function(dateStr) {
     day: 'numeric'
   });
   
-  const modal = document.getElementById('service-detail-modal');
-  const dateEl = document.getElementById('service-detail-date');
-  const contentEl = document.getElementById('service-detail-content');
-  
-  if (dateEl) dateEl.textContent = dateFormatted;
-  
   const serviceName = service.service_codes?.name || service.service_type;
   const serviceColor = service.service_codes?.color || '#2d8b4d';
+  const serviceCode = service.service_codes?.code || '';
   
-  if (contentEl) {
-    contentEl.innerHTML = `
+  // Crear modal dinámico
+  const existingModal = document.getElementById('service-detail-modal-dynamic');
+  if (existingModal) existingModal.remove();
+  
+  const modal = document.createElement('div');
+  modal.id = 'service-detail-modal-dynamic';
+  modal.className = 'post-modal';
+  modal.innerHTML = `
+    <div class="post-modal-content">
+      <div class="post-modal-header">
+        <h2>📅 Detalle de Servicio</h2>
+        <button class="close-post-modal" onclick="this.closest('.post-modal').remove()">✕</button>
+      </div>
+      
       <div style="text-align: center; margin-bottom: 24px;">
+        <div style="font-size: 16px; color: var(--gris-600); margin-bottom: 12px;">
+          ${dateFormatted}
+        </div>
         <div style="display: inline-block; padding: 12px 24px; background: ${serviceColor}; color: white; border-radius: 12px; font-size: 24px; font-weight: 800;">
-          ${service.service_codes?.code || service.service_type}
+          ${serviceCode}
         </div>
         <div style="margin-top: 12px; font-size: 18px; font-weight: 600; color: var(--gris-700);">
           ${serviceName}
@@ -459,11 +514,18 @@ window.showServiceDetail = function(dateStr) {
           <div style="color: var(--gris-700);">${service.notes}</div>
         </div>
       ` : ''}
-    `;
-  }
+    </div>
+  `;
   
-  if (modal) modal.classList.remove('hidden');
-};
+  document.body.appendChild(modal);
+  
+  // Cerrar al hacer click fuera
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.remove();
+    }
+  });
+}
 
 // ============================================
 // EVENT LISTENERS
@@ -480,17 +542,6 @@ function setupEventListeners() {
   document.getElementById('post-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'post-modal') {
       document.getElementById('post-modal').classList.add('hidden');
-    }
-  });
-
-  // Cerrar modal de detalle de servicio
-  document.querySelector('.close-service-detail')?.addEventListener('click', () => {
-    document.getElementById('service-detail-modal').classList.add('hidden');
-  });
-
-  document.getElementById('service-detail-modal')?.addEventListener('click', (e) => {
-    if (e.target.id === 'service-detail-modal') {
-      document.getElementById('service-detail-modal').classList.add('hidden');
     }
   });
 }
