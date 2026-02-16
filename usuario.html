@@ -110,6 +110,125 @@
       color: var(--gris-700);
     }
 
+    /* ===== ESTILOS CALENDARIO ===== */
+    .calendar-section {
+      background: white;
+      margin: 20px;
+      padding: 24px;
+      border-radius: var(--radio-xl);
+      box-shadow: var(--sombra-md);
+    }
+
+    .calendar-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .calendar-icon {
+      font-size: 28px;
+    }
+
+    .calendar-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--gris-900);
+    }
+
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 8px;
+    }
+
+    .calendar-day-header {
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--gris-600);
+      padding: 8px 4px;
+    }
+
+    .calendar-day {
+      aspect-ratio: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radio-md);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      background: var(--gris-50);
+      color: var(--gris-700);
+    }
+
+    .calendar-day:hover {
+      background: var(--gris-100);
+      transform: scale(1.05);
+    }
+
+    .calendar-day.has-service {
+      background: linear-gradient(135deg, var(--verde-claro) 0%, var(--verde-pastel-1) 100%);
+      color: var(--verde-oscuro);
+      font-weight: 700;
+      border: 2px solid var(--verde-medio);
+    }
+
+    .calendar-day.has-service::after {
+      content: '●';
+      position: absolute;
+      bottom: 4px;
+      font-size: 8px;
+      color: var(--verde-oscuro);
+    }
+
+    .calendar-day.today {
+      background: linear-gradient(135deg, var(--verde-oscuro) 0%, var(--verde-medio) 100%);
+      color: white;
+      font-weight: 700;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+
+    .calendar-day.other-month {
+      opacity: 0.3;
+      pointer-events: none;
+    }
+
+    .calendar-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .calendar-month-year {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--gris-900);
+    }
+
+    .calendar-nav-btn {
+      background: var(--gris-100);
+      border: none;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+      transition: all 0.2s;
+    }
+
+    .calendar-nav-btn:hover {
+      background: var(--gris-200);
+      transform: scale(1.1);
+    }
+
     .timeline {
       padding: 0 20px;
       margin-top: 24px;
@@ -312,6 +431,14 @@
       .user-details h2 {
         font-size: 16px;
       }
+      
+      .calendar-day {
+        font-size: 12px;
+      }
+      
+      .calendar-day-header {
+        font-size: 10px;
+      }
     }
   </style>
 </head>
@@ -337,6 +464,32 @@
     <div class="service-label">SERVICIO ACTUAL</div>
     <div class="service-title">Cargando...</div>
     <div class="service-time">...</div>
+  </div>
+
+  <!-- ✅ CALENDARIO DE SERVICIOS (INSERTADO AQUÍ) -->
+  <div class="calendar-section">
+    <div class="calendar-header">
+      <span class="calendar-icon">📅</span>
+      <h2 class="calendar-title">Calendario de Servicios</h2>
+    </div>
+    
+    <div class="calendar-nav">
+      <button class="calendar-nav-btn" id="prev-month">‹</button>
+      <div class="calendar-month-year" id="current-month-year"></div>
+      <button class="calendar-nav-btn" id="next-month">›</button>
+    </div>
+    
+    <div class="calendar-grid" id="calendar-grid">
+      <!-- Headers de días -->
+      <div class="calendar-day-header">Dom</div>
+      <div class="calendar-day-header">Lun</div>
+      <div class="calendar-day-header">Mar</div>
+      <div class="calendar-day-header">Mié</div>
+      <div class="calendar-day-header">Jue</div>
+      <div class="calendar-day-header">Vie</div>
+      <div class="calendar-day-header">Sáb</div>
+      <!-- Los días se llenan con JavaScript -->
+    </div>
   </div>
 
   <!-- Timeline de posts -->
