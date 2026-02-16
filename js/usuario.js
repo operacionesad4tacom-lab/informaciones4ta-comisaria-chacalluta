@@ -1,5 +1,6 @@
 /**
- * PANEL DE USUARIO - FUNCIONARIOS
+ * PANEL DE USUARIO - FUNCIONARIOS v2.0
+ * Incluye: Calendario de servicios y registro de lectura
  */
 
 import { 
@@ -10,15 +11,22 @@ import {
   formatDateShort,
   showToast,
   showLoading,
-  hideLoading
+  hideLoading,
+  markPostAsRead,
+  markServiceAsRead
 } from './config.js';
 
 import { logout, checkSession } from './auth.js';
 
 let currentUser = null;
 let currentProfile = null;
+let currentMonth = new Date().getMonth();
+let currentYear = new Date().getFullYear();
+let servicesCache = {};
 
+// ============================================
 // INICIALIZACIÓN
+// ============================================
 async function init() {
   showLoading();
   
@@ -34,16 +42,20 @@ async function init() {
   await Promise.all([
     loadUserInfo(),
     loadCurrentService(),
-    loadPosts()
+    loadPosts(),
+    loadServicesCalendar(currentYear, currentMonth)
   ]);
 
   setupEventListeners();
+  setupCalendarListeners();
   setupRealtimeSubscriptions();
 
   hideLoading();
 }
 
+// ============================================
 // CARGAR INFORMACIÓN DEL USUARIO
+// ============================================
 async function loadUserInfo() {
   const userName = document.getElementById('user-name');
   const userRank = document.getElementById('user-rank');
@@ -62,7 +74,9 @@ async function loadUserInfo() {
   if (userAvatar) userAvatar.textContent = initials;
 }
 
+// ============================================
 // CARGAR SERVICIO ACTUAL
+// ============================================
 async function loadCurrentService() {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -79,6 +93,9 @@ async function loadCurrentService() {
     const serviceContainer = document.getElementById('current-service');
     
     if (data) {
+      // Marcar como leído
+      markServiceAsRead(data.id);
+      
       serviceContainer.innerHTML = `
         <div class="service-label">SERVICIO ACTUAL</div>
         <div class="service-title">${data.service_type}</div>
@@ -97,7 +114,9 @@ async function loadCurrentService() {
   }
 }
 
+// ============================================
 // CARGAR POSTS/NOTICIAS
+// ============================================
 async function loadPosts() {
   try {
     const { data, error } = await supabase
@@ -183,7 +202,9 @@ async function loadPosts() {
   }
 }
 
-// Renderizar un post
+// ============================================
+// RENDERIZAR POST
+// ============================================
 function renderPost(post) {
   const priorityClass = post.priority === 'urgente' ? 'urgente' : 
                        post.priority === 'importante' ? 'importante' : 'normal';
@@ -213,6 +234,10 @@ function renderPost(post) {
   `;
 }
 
+// ============================================
+// HELPERS
+// ============================================
+
 // Truncar texto
 function truncateText(text, maxLength) {
   if (text.length <= maxLength) return text;
@@ -233,8 +258,13 @@ function getCategoryIcon(category) {
   return icons[category] || '📰';
 }
 
-// ABRIR MODAL DE POST
+// ============================================
+// MODAL DE POST
+// ============================================
 function openPostModal(post) {
+  // Marcar como leído
+  markPostAsRead(post.id);
+  
   const modal = document.getElementById('post-modal');
   const modalTitle = document.getElementById('modal-title');
   const modalContent = document.getElementById('modal-content');
@@ -266,11 +296,182 @@ function openPostModal(post) {
   modal.classList.remove('hidden');
 }
 
+// ============================================
+// CALENDARIO DE SERVICIOS
+// ============================================
+
+// Cargar servicios del mes
+async function loadServicesCalendar(year, month) {
+  try {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    
+    const firstDate = firstDay.toISOString().split('T')[0];
+    const lastDate = lastDay.toISOString().split('T')[0];
+    
+    const { data, error } = await supabase
+      .from('services')
+      .select(`
+        *,
+        service_codes:service_code_id (code, name, color)
+      `)
+      .eq('user_id', currentUser.id)
+      .gte('date', firstDate)
+      .lte('date', lastDate)
+      .order('date');
+    
+    if (error) throw error;
+    
+    // Cachear servicios
+    servicesCache = {};
+    if (data) {
+      data.forEach(service => {
+        servicesCache[service.date] = service;
+      });
+    }
+    
+    renderCalendar(year, month);
+  } catch (error) {
+    console.error('Error cargando calendario:', error);
+  }
+}
+
+// Renderizar calendario
+function renderCalendar(year, month) {
+  const monthNames = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
+  
+  // Actualizar label del mes
+  const label = document.getElementById('current-month-label');
+  if (label) label.textContent = `${monthNames[month]} ${year}`;
+  
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startingDayOfWeek = firstDay.getDay();
+  const totalDays = lastDay.getDate();
+  
+  const calendarDays = document.getElementById('calendar-days');
+  if (!calendarDays) return;
+  
+  let html = '';
+  
+  // Días vacíos al inicio
+  for (let i = 0; i < startingDayOfWeek; i++) {
+    html += '<div class="calendar-day empty"></div>';
+  }
+  
+  // Días del mes
+  const today = new Date().toISOString().split('T')[0];
+  
+  for (let day = 1; day <= totalDays; day++) {
+    const date = new Date(year, month, day);
+    const dateStr = date.toISOString().split('T')[0];
+    const service = servicesCache[dateStr];
+    const isToday = dateStr === today;
+    
+    const serviceCode = service?.service_codes?.code || service?.service_type || '';
+    const serviceColor = service?.service_codes?.color || '#9ca3af';
+    
+    html += `
+      <div class="calendar-day ${isToday ? 'today' : ''}" ${service ? `onclick="showServiceDetail('${dateStr}')"` : ''}>
+        <div class="day-number">${day}</div>
+        ${service ? `
+          <div class="service-badge" style="background: ${serviceColor};">
+            ${serviceCode}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+  
+  calendarDays.innerHTML = html;
+}
+
+// Navegar entre meses
+function navigateMonth(direction) {
+  currentMonth += direction;
+  
+  if (currentMonth > 11) {
+    currentMonth = 0;
+    currentYear++;
+  } else if (currentMonth < 0) {
+    currentMonth = 11;
+    currentYear--;
+  }
+  
+  loadServicesCalendar(currentYear, currentMonth);
+}
+
+// Mostrar detalle de servicio
+window.showServiceDetail = function(dateStr) {
+  const service = servicesCache[dateStr];
+  if (!service) return;
+  
+  // Marcar como leído
+  markServiceAsRead(service.id);
+  
+  const date = new Date(dateStr);
+  const dateFormatted = date.toLocaleDateString('es-CL', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  
+  const modal = document.getElementById('service-detail-modal');
+  const dateEl = document.getElementById('service-detail-date');
+  const contentEl = document.getElementById('service-detail-content');
+  
+  if (dateEl) dateEl.textContent = dateFormatted;
+  
+  const serviceName = service.service_codes?.name || service.service_type;
+  const serviceColor = service.service_codes?.color || '#2d8b4d';
+  
+  if (contentEl) {
+    contentEl.innerHTML = `
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="display: inline-block; padding: 12px 24px; background: ${serviceColor}; color: white; border-radius: 12px; font-size: 24px; font-weight: 800;">
+          ${service.service_codes?.code || service.service_type}
+        </div>
+        <div style="margin-top: 12px; font-size: 18px; font-weight: 600; color: var(--gris-700);">
+          ${serviceName}
+        </div>
+      </div>
+      
+      <div style="background: var(--gris-50); padding: 16px; border-radius: 12px; margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+          <span style="color: var(--gris-600);">⏰ Horario:</span>
+          <span style="font-weight: 600;">${service.start_time} - ${service.end_time}</span>
+        </div>
+        ${service.location ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--gris-600);">📍 Ubicación:</span>
+            <span style="font-weight: 600;">${service.location}</span>
+          </div>
+        ` : ''}
+      </div>
+      
+      ${service.notes ? `
+        <div style="background: var(--verde-claro); padding: 16px; border-radius: 12px; border-left: 4px solid var(--verde-medio);">
+          <div style="font-weight: 600; margin-bottom: 8px; color: var(--verde-oscuro);">📝 Notas:</div>
+          <div style="color: var(--gris-700);">${service.notes}</div>
+        </div>
+      ` : ''}
+    `;
+  }
+  
+  if (modal) modal.classList.remove('hidden');
+};
+
+// ============================================
 // EVENT LISTENERS
+// ============================================
 function setupEventListeners() {
   document.getElementById('logout-btn')?.addEventListener('click', logout);
 
-  // Cerrar modal
+  // Cerrar modal de post
   document.querySelector('.close-post-modal')?.addEventListener('click', () => {
     document.getElementById('post-modal').classList.add('hidden');
   });
@@ -281,9 +482,28 @@ function setupEventListeners() {
       document.getElementById('post-modal').classList.add('hidden');
     }
   });
+
+  // Cerrar modal de detalle de servicio
+  document.querySelector('.close-service-detail')?.addEventListener('click', () => {
+    document.getElementById('service-detail-modal').classList.add('hidden');
+  });
+
+  document.getElementById('service-detail-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'service-detail-modal') {
+      document.getElementById('service-detail-modal').classList.add('hidden');
+    }
+  });
 }
 
+// Event listeners para calendario
+function setupCalendarListeners() {
+  document.getElementById('prev-month')?.addEventListener('click', () => navigateMonth(-1));
+  document.getElementById('next-month')?.addEventListener('click', () => navigateMonth(1));
+}
+
+// ============================================
 // REALTIME SUBSCRIPTIONS
+// ============================================
 function setupRealtimeSubscriptions() {
   // Nuevos posts
   supabase
@@ -308,10 +528,13 @@ function setupRealtimeSubscriptions() {
       filter: `user_id=eq.${currentUser.id}`
     }, () => {
       loadCurrentService();
+      loadServicesCalendar(currentYear, currentMonth);
       showToast('Tu servicio ha sido actualizado', 'info');
     })
     .subscribe();
 }
 
+// ============================================
 // INICIAR
+// ============================================
 window.addEventListener('DOMContentLoaded', init);
