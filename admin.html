@@ -259,6 +259,73 @@
       border-color: var(--gris-900);
       transform: scale(1.1);
     }
+
+    .calendar-day {
+      aspect-ratio: 1;
+      padding: 8px;
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 60px;
+    }
+
+    .calendar-day:hover {
+      background: var(--gris-100);
+      transform: scale(1.05);
+    }
+
+    .calendar-day.empty {
+      cursor: default;
+      opacity: 0.3;
+    }
+
+    .calendar-day.empty:hover {
+      background: transparent;
+      transform: none;
+    }
+
+    .calendar-day.today {
+      border: 2px solid var(--verde-medio);
+      font-weight: 700;
+    }
+
+    .calendar-day .day-number {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .calendar-day .service-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: white;
+    }
+
+    .icon-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.2s;
+    }
+
+    .icon-btn:hover {
+      opacity: 0.8;
+      transform: scale(1.1);
+    }
   </style>
 </head>
 <body>
