@@ -181,3 +181,61 @@ export function showToast(message, type = 'info') {
 console.log('✅ Configuración cargada correctamente');
 console.log('📡 Supabase URL:', SUPABASE_URL);
 console.log('☁️ Cloudinary Cloud:', CLOUDINARY_CLOUD_NAME);
+
+// ============================================
+// ✅ NUEVAS FUNCIONES v2.0
+// ============================================
+
+// Marcar post como leído
+export async function markPostAsRead(postId) {
+  try {
+    const { error } = await supabase.rpc('mark_post_as_read', {
+      p_post_id: postId
+    });
+    if (error) console.error('Error marcando post como leído:', error);
+  } catch (error) {
+    console.error('Error en markPostAsRead:', error);
+  }
+}
+
+// Marcar servicio como leído
+export async function markServiceAsRead(serviceId) {
+  try {
+    const { error } = await supabase.rpc('mark_service_as_read', {
+      p_service_id: serviceId
+    });
+    if (error) console.error('Error marcando servicio como leído:', error);
+  } catch (error) {
+    console.error('Error en markServiceAsRead:', error);
+  }
+}
+
+// Obtener usuarios para selector de destinatarios
+export async function getAllUsers() {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, rank, badge_number, role')
+    .eq('role', 'funcionario')
+    .order('full_name');
+  
+  if (error) {
+    console.error('Error obteniendo usuarios:', error);
+    return [];
+  }
+  return data || [];
+}
+
+// Obtener estadísticas de lectura de un post (solo para admins)
+export async function getPostReadStats(postId) {
+  const { data, error } = await supabase
+    .from('post_read_stats')
+    .select('*')
+    .eq('post_id', postId)
+    .single();
+  
+  if (error) {
+    console.error('Error obteniendo stats:', error);
+    return null;
+  }
+  return data;
+}
