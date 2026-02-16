@@ -1,6 +1,7 @@
 /**
- * PANEL DE ADMINISTRADOR - VERSIÓN COMPLETA v2.0
+ * PANEL DE ADMINISTRADOR - VERSIÓN COMPLETA v3.0 FINAL
  * Incluye: Publicaciones privadas, destinatarios, estadísticas de lectura
+ * CORRECCIONES: Fechas Excel, normalización de datos, manejo de errores
  */
 
 import { 
@@ -398,7 +399,7 @@ async function editSigla(siglaId) {
     document.getElementById('sigla-modal-title').textContent = 'Editar Sigla';
     document.getElementById('sigla-id').value = data.id;
     document.getElementById('sigla-code').value = data.code;
-    document.getElementById('sigla-code').disabled = true; // No permitir cambiar código
+    document.getElementById('sigla-code').disabled = true;
     document.getElementById('sigla-name').value = data.name;
     
     // Marcar tipo de servicio
@@ -491,14 +492,14 @@ async function readExcelFile(file) {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { 
           type: 'array',
-          cellDates: false, // Mantener números seriales de Excel
-          raw: true // Preservar valores raw sin conversión
+          cellDates: false,
+          raw: true
         });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         const jsonData = XLSX.utils.sheet_to_json(firstSheet, { 
           header: 1,
-          raw: true, // No convertir automáticamente
-          defval: null // Valor por defecto para celdas vacías
+          raw: true,
+          defval: null
         });
         
         resolve(parseExcelData(jsonData));
@@ -521,11 +522,9 @@ function excelSerialToDate(serial) {
   
   // Si es un número serial de Excel
   if (typeof serial === 'number') {
-    // Excel usa 1900-01-01 como día 1 (pero tiene un bug: considera 1900 bisiesto)
-    const excelEpoch = new Date(1899, 11, 30); // 30 de diciembre de 1899
+    const excelEpoch = new Date(1899, 11, 30);
     const date = new Date(excelEpoch.getTime() + serial * 86400000);
     
-    // Formatear como YYYY-MM-DD
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -563,6 +562,8 @@ function parseExcelData(jsonData) {
   const headers = jsonData[0];
   const services = [];
   
+  console.log('Headers del Excel:', headers);
+  
   // Procesar cada fila (saltando encabezados)
   for (let i = 1; i < jsonData.length; i++) {
     const row = jsonData[i];
@@ -587,12 +588,18 @@ function parseExcelData(jsonData) {
         continue;
       }
       
+      // Normalizar datos antes de guardar
       services.push({
-        badge_number: badgeNumber,
+        badge_number: String(badgeNumber).trim(),
         date: dateStr,
-        sigla_code: siglaCode
+        sigla_code: String(siglaCode).trim().toUpperCase()
       });
     }
+  }
+  
+  console.log(`Parseados ${services.length} servicios desde Excel`);
+  if (services.length > 0) {
+    console.log('Ejemplo de servicio:', services[0]);
   }
   
   return services;
@@ -647,54 +654,103 @@ async function confirmExcelUpload() {
 
     const { data: siglas } = await supabase
       .from('service_codes')
-      .select('id, code, name, start_time, end_time');
+      .select('id, code, name, start_time, end_time, is_rest');
 
-    // Crear mapas para búsqueda rápida
+    // Crear mapas para búsqueda rápida (convertir badge_number a string)
     const userMap = {};
-    users?.forEach(u => userMap[u.badge_number] = u.id);
+    users?.forEach(u => {
+      const badgeStr = String(u.badge_number).trim();
+      userMap[badgeStr] = u.id;
+    });
 
     const siglaMap = {};
-    siglas?.forEach(s => siglaMap[s.code] = s);
+    siglas?.forEach(s => {
+      const codeStr = String(s.code).trim().toUpperCase();
+      siglaMap[codeStr] = s;
+    });
+
+    // Debug: mostrar mapas
+    console.log('Usuarios encontrados:', Object.keys(userMap).length);
+    console.log('Siglas encontradas:', Object.keys(siglaMap).length);
+    console.log('Datos Excel:', excelData.length);
 
     // Procesar servicios
     const servicesToInsert = [];
     const errors = [];
 
     for (const service of excelData) {
-      const userId = userMap[service.badge_number];
-      const sigla = siglaMap[service.sigla_code];
+      const badgeStr = String(service.badge_number).trim();
+      const siglaStr = String(service.sigla_code).trim().toUpperCase();
+      
+      const userId = userMap[badgeStr];
+      const sigla = siglaMap[siglaStr];
 
       if (!userId) {
-        errors.push(`Usuario no encontrado: ${service.badge_number}`);
+        errors.push(`Usuario no encontrado: ${badgeStr}`);
         continue;
       }
 
       if (!sigla) {
-        errors.push(`Sigla no encontrada: ${service.sigla_code}`);
+        errors.push(`Sigla no encontrada: ${siglaStr}`);
         continue;
       }
 
-      servicesToInsert.push({
+      // Preparar objeto de servicio
+      const serviceObj = {
         user_id: userId,
         service_code_id: sigla.id,
         date: service.date,
-        service_type: sigla.name,
-        start_time: sigla.start_time,
-        end_time: sigla.end_time
-      });
+        service_type: sigla.name
+      };
+
+      // Solo agregar horarios si no es descanso
+      if (!sigla.is_rest && sigla.start_time && sigla.end_time) {
+        serviceObj.start_time = sigla.start_time;
+        serviceObj.end_time = sigla.end_time;
+      } else {
+        // Para descansos, usar horarios por defecto o null
+        serviceObj.start_time = '00:00:00';
+        serviceObj.end_time = '00:00:00';
+      }
+
+      servicesToInsert.push(serviceObj);
     }
 
+    // Mostrar errores si hay
     if (errors.length > 0) {
       console.warn('Errores encontrados:', errors);
+      
+      // Si hay demasiados errores, mostrar alerta
+      if (errors.length > 10) {
+        const continuar = confirm(
+          `Se encontraron ${errors.length} errores.\n\n` +
+          `Primeros errores:\n${errors.slice(0, 5).join('\n')}\n...\n\n` +
+          `¿Desea continuar con ${servicesToInsert.length} servicios válidos?`
+        );
+        
+        if (!continuar) {
+          hideLoading();
+          return;
+        }
+      } else if (errors.length > 0) {
+        showToast(`${errors.length} registros con errores (ver consola)`, 'info');
+      }
     }
 
     if (servicesToInsert.length === 0) {
-      throw new Error('No hay servicios válidos para insertar');
+      hideLoading();
+      showToast('No hay servicios válidos para insertar. Revisa los errores en la consola.', 'error');
+      return;
     }
+
+    console.log('Servicios a insertar:', servicesToInsert.length);
+    console.log('Ejemplo:', servicesToInsert[0]);
 
     // Eliminar servicios existentes en las fechas afectadas
     const dates = [...new Set(servicesToInsert.map(s => s.date))];
     const userIds = [...new Set(servicesToInsert.map(s => s.user_id))];
+
+    console.log('Eliminando servicios existentes para:', userIds.length, 'usuarios en', dates.length, 'fechas');
 
     for (const userId of userIds) {
       await supabase
@@ -705,11 +761,18 @@ async function confirmExcelUpload() {
     }
 
     // Insertar nuevos servicios
-    const { error } = await supabase
+    console.log('Insertando servicios...');
+    const { error, data: insertedData } = await supabase
       .from('services')
-      .insert(servicesToInsert);
+      .insert(servicesToInsert)
+      .select();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error de Supabase:', error);
+      throw error;
+    }
+
+    console.log('Servicios insertados:', insertedData?.length || 0);
 
     hideLoading();
     showToast(`✅ ${servicesToInsert.length} servicios cargados exitosamente`, 'success');
@@ -724,7 +787,23 @@ async function confirmExcelUpload() {
   } catch (error) {
     hideLoading();
     console.error('Error en carga masiva:', error);
-    showToast('Error al cargar servicios: ' + error.message, 'error');
+    
+    // Mensaje de error más descriptivo
+    let errorMsg = 'Error al cargar servicios';
+    
+    if (error.message) {
+      errorMsg += ': ' + error.message;
+    }
+    
+    if (error.code) {
+      errorMsg += ` (Código: ${error.code})`;
+    }
+    
+    if (error.details) {
+      console.error('Detalles:', error.details);
+    }
+    
+    showToast(errorMsg, 'error');
   }
 }
 
@@ -845,7 +924,7 @@ window.toggleRecipients = function() {
   
   if (postType === 'private') {
     recipientsSelector.style.display = 'block';
-    loadAllUsers(); // Cargar usuarios cuando se activa
+    loadAllUsers();
   } else {
     recipientsSelector.style.display = 'none';
   }
