@@ -259,73 +259,6 @@
       border-color: var(--gris-900);
       transform: scale(1.1);
     }
-
-    .calendar-day {
-      aspect-ratio: 1;
-      padding: 8px;
-      border-radius: 8px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.2s;
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      min-height: 60px;
-    }
-
-    .calendar-day:hover {
-      background: var(--gris-100);
-      transform: scale(1.05);
-    }
-
-    .calendar-day.empty {
-      cursor: default;
-      opacity: 0.3;
-    }
-
-    .calendar-day.empty:hover {
-      background: transparent;
-      transform: none;
-    }
-
-    .calendar-day.today {
-      border: 2px solid var(--verde-medio);
-      font-weight: 700;
-    }
-
-    .calendar-day .day-number {
-      font-size: 14px;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-
-    .calendar-day .service-badge {
-      font-size: 11px;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 4px;
-      color: white;
-    }
-
-    .icon-btn {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: none;
-      cursor: pointer;
-      font-size: 16px;
-      transition: all 0.2s;
-    }
-
-    .icon-btn:hover {
-      opacity: 0.8;
-      transform: scale(1.1);
-    }
   </style>
 </head>
 <body>
@@ -425,6 +358,35 @@
             <option value="operaciones">Operaciones</option>
             <option value="bienestar">Bienestar</option>
           </select>
+        </div>
+
+        <!-- ✅ NUEVO: Selector de tipo de publicación -->
+        <div class="form-group">
+          <label>Tipo de Publicación *</label>
+          <div>
+            <label style="display: inline-flex; align-items: center; margin-right: 20px;">
+              <input type="radio" name="post_type" value="public" checked style="width: auto; margin-right: 8px;" onchange="toggleRecipients()">
+              📢 Pública (todos los usuarios)
+            </label>
+            <label style="display: inline-flex; align-items: center;">
+              <input type="radio" name="post_type" value="private" style="width: auto; margin-right: 8px;" onchange="toggleRecipients()">
+              🔒 Privada (destinatarios específicos)
+            </label>
+          </div>
+        </div>
+
+        <!-- ✅ NUEVO: Selector de destinatarios (oculto por defecto) -->
+        <div class="form-group" id="recipients-selector" style="display: none;">
+          <label for="recipients">Destinatarios * (selecciona uno o más)</label>
+          <div style="border: 1px solid var(--gris-300); border-radius: var(--radio-md); max-height: 200px; overflow-y: auto; padding: 12px;">
+            <div id="users-list-container">
+              <!-- Se llena dinámicamente con JavaScript -->
+              <p style="color: var(--gris-500); text-align: center;">Cargando usuarios...</p>
+            </div>
+          </div>
+          <p style="font-size: 12px; color: var(--gris-600); margin-top: 8px;">
+            Selecciona los funcionarios que podrán ver esta publicación
+          </p>
         </div>
         
         <div class="form-group">
