@@ -5,8 +5,8 @@
 
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-const SUPABASE_URL = 'https://bpjepxcryqdwnmdedcse.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwamVweGNyeXFkd25tZGVkY3NlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExNTgxNjQsImV4cCI6MjA4NjczNDE2NH0.nF-vKdAqQdIWX2inyottEeN3hiSkaSOq9lqc5DG118s';
+const SUPABASE_URL = 'https://wscdbfoqexmovuiussaf.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzY2RiZm9xZXhtb3Z1aXVzc2FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0NjAxNjcsImV4cCI6MjA4NzAzNjE2N30.Bj8aG540DEEeYGp1Pv9F0OOliiUEoezy1dPZHBvkKv0';
 const CLOUDINARY_CLOUD_NAME = 'dw61kjdzf';
 const CLOUDINARY_UPLOAD_PRESET = 'carabineros_uploads';
 const CLOUDINARY_FOLDER = 'carabineros';
