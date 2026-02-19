@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mi Panel — Carabineros Intranet</title>
+  <link rel="stylesheet" href="css/colors.css">
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    body { background: #f0f4f0; padding-bottom: 32px; }
+
+    /* ── HEADER ── */
+    .header {
+      background: linear-gradient(135deg, #023d17 0%, #04742c 60%, #2d8b4d 100%);
+      padding: 20px 20px 24px;
+      color: white;
+      position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+    .header-top { display: flex; justify-content: space-between; align-items: center; }
+    .profile-info { display: flex; align-items: center; gap: 14px; }
+    .avatar {
+      width: 52px; height: 52px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.5);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; font-weight: 800; color: white; flex-shrink: 0;
+    }
+    .user-name { font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+    .user-rank { font-size: 13px; opacity: 0.8; }
+    .btn-logout {
+      background: rgba(255,255,255,0.15);
+      border: 1.5px solid rgba(255,255,255,0.3);
+      color: white; border-radius: 10px;
+      padding: 8px 16px; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .btn-logout:hover { background: rgba(255,255,255,0.25); }
+
+    /* ── UNREAD BANNER ── */
+    .unread-banner {
+      background: linear-gradient(90deg, var(--urgente) 0%, #b91c1c 100%);
+      color: white; padding: 12px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+      cursor: pointer; transition: opacity 0.2s;
+    }
+    .unread-banner:hover { opacity: 0.92; }
+    .unread-banner-left { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 14px; }
+    .unread-dot { width: 10px; height: 10px; background: white; border-radius: 50%; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.6;transform:scale(1.3)} }
+
+    /* ── MAIN CONTENT ── */
+    .main { max-width: 680px; margin: 0 auto; padding: 20px 16px; }
+
+    /* ── SERVICIO HOY ── */
+    .today-card {
+      background: white; border-radius: 20px;
+      box-shadow: var(--sombra-md); overflow: hidden; margin-bottom: 20px;
+    }
+    .today-top {
+      padding: 20px 24px 16px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .today-label {
+      font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+      color: var(--gris-500); text-transform: uppercase; margin-bottom: 4px;
+    }
+    .today-date { font-size: 15px; font-weight: 600; color: var(--gris-700); }
+    .service-badge-big {
+      padding: 10px 20px; border-radius: 14px;
+      font-size: 22px; font-weight: 900; color: white;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .service-detail {
+      padding: 0 24px 20px;
+      border-top: 1px solid var(--gris-100);
+      padding-top: 16px;
+    }
+    .service-name { font-size: 20px; font-weight: 800; color: var(--gris-900); margin-bottom: 6px; }
+    .service-time { font-size: 15px; color: var(--gris-600); display: flex; align-items: center; gap: 6px; }
+    .service-time::before { content: '⏰'; }
+    .no-service { padding: 28px 24px; text-align: center; }
+    .no-service-icon { font-size: 40px; margin-bottom: 12px; }
+    .no-service h3 { color: var(--gris-700); margin-bottom: 4px; }
+    .no-service p { color: var(--gris-500); font-size: 14px; margin: 0; }
+
+    /* ── PRÓXIMOS DÍAS ── */
+    .upcoming-section { background: white; border-radius: 20px; box-shadow: var(--sombra-sm); padding: 20px 24px; margin-bottom: 20px; }
+    .section-title { font-size: 14px; font-weight: 700; color: var(--gris-500); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+    .upcoming-list { display: flex; flex-direction: column; gap: 10px; }
+    .upcoming-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; background: var(--gris-50); border-radius: 12px;
+      border-left: 4px solid var(--gris-300);
+    }
+    .upcoming-item.has-service { border-left-color: var(--verde-medio); background: #f0faf4; }
+    .upcoming-date { font-size: 14px; font-weight: 600; color: var(--gris-700); }
+    .upcoming-day { font-size: 12px; color: var(--gris-500); }
+    .upcoming-badge {
+      padding: 5px 14px; border-radius: 20px;
+      font-size: 13px; font-weight: 700; color: white;
+    }
+
+    /* ── CALENDARIO ── */
+    .calendar-card { background: white; border-radius: 20px; box-shadow: var(--sombra-sm); padding: 20px 24px; margin-bottom: 20px; }
+    .cal-nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .cal-month { font-size: 17px; font-weight: 700; color: var(--gris-900); }
+    .cal-btn {
+      width: 34px; height: 34px; border-radius: 50%; background: var(--gris-100);
+      border: none; cursor: pointer; font-size: 16px; transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .cal-btn:hover { background: var(--gris-200); }
+    .cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 4px; }
+    .cal-head { text-align: center; font-size: 11px; font-weight: 700; color: var(--gris-500); padding: 6px 2px; text-transform: uppercase; }
+    .cal-day {
+      aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+      border-radius: 10px; font-size: 13px; font-weight: 500;
+      cursor: default; transition: all 0.15s; color: var(--gris-700);
+      background: var(--gris-50); position: relative;
+    }
+    .cal-day.has-service {
+      background: var(--verde-claro); color: var(--verde-oscuro);
+      font-weight: 800; cursor: pointer; border: 2px solid var(--verde-pastel-1);
+    }
+    .cal-day.has-service:hover { background: var(--verde-pastel-1); transform: scale(1.08); }
+    .cal-day.today {
+      background: linear-gradient(135deg, var(--verde-oscuro), var(--verde-medio));
+      color: white; font-weight: 800;
+      box-shadow: 0 4px 12px rgba(4,116,44,0.4);
+    }
+    .cal-day.empty { background: transparent; }
+    .cal-day .service-dot {
+      position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
+      width: 5px; height: 5px; border-radius: 50%; background: var(--verde-oscuro);
+    }
+    .cal-day.today .service-dot { background: rgba(255,255,255,0.7); }
+
+    /* ── NOTICIAS ── */
+    .feed-section { margin-bottom: 8px; }
+    .priority-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 14px; margin-top: 24px;
+    }
+    .priority-bar { width: 5px; height: 28px; border-radius: 3px; flex-shrink: 0; }
+    .priority-bar.urgente { background: var(--urgente); }
+    .priority-bar.importante { background: var(--importante); }
+    .priority-bar.normal { background: var(--normal); }
+    .priority-label { font-size: 16px; font-weight: 800; color: var(--gris-900); }
+    .priority-count {
+      background: var(--gris-100); color: var(--gris-600);
+      border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 700;
+    }
+
+    .post-card {
+      background: white; border-radius: 16px; padding: 18px 20px;
+      box-shadow: var(--sombra-sm); margin-bottom: 12px;
+      cursor: pointer; transition: all 0.2s; position: relative;
+      border-left: 4px solid transparent;
+    }
+    .post-card:hover { box-shadow: var(--sombra-md); transform: translateY(-2px); }
+    .post-card.urgente { border-left-color: var(--urgente); }
+    .post-card.importante { border-left-color: var(--importante); }
+    .post-card.normal { border-left-color: var(--normal); }
+    .post-card.unread::after {
+      content: ''; position: absolute; top: 16px; right: 16px;
+      width: 10px; height: 10px; background: var(--urgente); border-radius: 50%;
+    }
+    .post-card.importante.unread::after { background: var(--importante); }
+    .post-card.normal.unread::after { background: var(--normal); }
+    .post-card-title { font-size: 15px; font-weight: 700; color: var(--gris-900); margin-bottom: 6px; padding-right: 20px; }
+    .post-card-preview { font-size: 13px; color: var(--gris-600); line-height: 1.5; margin-bottom: 10px; }
+    .post-card-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--gris-400); }
+    .post-private-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--importante-bg); color: #92400e;
+      padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .attachment-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--verde-claro); color: var(--verde-oscuro);
+      padding: 5px 12px; border-radius: 8px; font-size: 12px; font-weight: 600;
+      margin-top: 8px; text-decoration: none;
+    }
+    .attachment-chip:hover { background: var(--verde-pastel-1); }
+
+    /* ── POST MODAL ── */
+    .post-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      z-index: 1000; display: flex; align-items: flex-end; justify-content: center;
+      padding: 0;
+    }
+    @media (min-width: 600px) {
+      .post-modal-overlay { align-items: center; padding: 20px; }
+      .post-modal-box { border-radius: 20px !important; max-height: 85vh !important; }
+    }
+    .post-modal-box {
+      background: white; width: 100%; max-width: 600px;
+      max-height: 92vh; overflow-y: auto;
+      border-radius: 20px 20px 0 0;
+      animation: slideUp 0.3s ease-out;
+    }
+    .post-modal-handle { width: 40px; height: 4px; background: var(--gris-300); border-radius: 2px; margin: 12px auto 0; }
+    .post-modal-inner { padding: 20px 24px 32px; }
+    .post-modal-priority {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700;
+      text-transform: uppercase; margin-bottom: 14px;
+    }
+    .post-modal-priority.urgente { background: var(--urgente-bg); color: var(--urgente); }
+    .post-modal-priority.importante { background: var(--importante-bg); color: #92400e; }
+    .post-modal-priority.normal { background: var(--normal-bg); color: var(--normal); }
+    .post-modal-title { font-size: 22px; font-weight: 800; color: var(--gris-900); margin-bottom: 16px; line-height: 1.3; }
+    .post-modal-content { font-size: 15px; color: var(--gris-700); line-height: 1.7; white-space: pre-line; margin-bottom: 20px; }
+    .post-modal-footer {
+      padding: 16px 24px; background: var(--gris-50);
+      border-top: 1px solid var(--gris-100); display: flex;
+      justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+      font-size: 13px; color: var(--gris-500);
+    }
+    .btn-confirm {
+      background: linear-gradient(135deg, var(--verde-medio), var(--verde-oscuro));
+      color: white; border: none; padding: 12px 24px; border-radius: 12px;
+      font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .btn-confirm:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(4,116,44,0.35); }
+    .btn-confirm.confirmed { background: var(--gris-200); color: var(--gris-600); cursor: default; }
+    .btn-confirm.confirmed:hover { transform: none; box-shadow: none; }
+
+    /* ── SERVICE MODAL ── */
+    .service-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      z-index: 1000; display: flex; align-items: center; justify-content: center;
+      padding: 20px; animation: fadeIn 0.2s ease-out;
+    }
+    .service-modal-box {
+      background: white; border-radius: 20px; padding: 32px;
+      max-width: 420px; width: 100%; animation: slideUp 0.25s ease-out;
+    }
+    .service-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .service-modal-close {
+      background: var(--gris-100); border: none; border-radius: 50%;
+      width: 36px; height: 36px; cursor: pointer; font-size: 18px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .service-modal-code-big {
+      text-align: center; padding: 20px;
+      border-radius: 16px; color: white; margin-bottom: 20px;
+    }
+    .service-modal-code-big .code { font-size: 48px; font-weight: 900; }
+    .service-modal-code-big .name { font-size: 16px; font-weight: 600; opacity: 0.9; margin-top: 4px; }
+    .service-info-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 0; border-bottom: 1px solid var(--gris-100);
+    }
+    .service-info-row:last-child { border-bottom: none; }
+    .service-info-label { color: var(--gris-500); font-size: 14px; }
+    .service-info-value { font-weight: 700; color: var(--gris-900); font-size: 14px; }
+
+    /* ── EMPTY STATE ── */
+    .empty-feed { text-align: center; padding: 48px 20px; color: var(--gris-400); }
+    .empty-feed-icon { font-size: 48px; margin-bottom: 16px; }
+    .empty-feed h3 { color: var(--gris-600); margin-bottom: 6px; }
+
+    @media (max-width: 480px) {
+      .main { padding: 16px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div class="profile-info">
+      <div class="avatar" id="user-avatar">CB</div>
+      <div>
+        <div class="user-name" id="user-name">Cargando...</div>
+        <div class="user-rank" id="user-rank">Funcionario</div>
+      </div>
+    </div>
+    <button class="btn-logout" id="logout-btn">Salir</button>
+  </div>
+</div>
+
+<div id="unread-banner" class="unread-banner hidden">
+  <div class="unread-banner-left">
+    <div class="unread-dot"></div>
+    <span id="unread-text">Tienes notificaciones sin leer</span>
+  </div>
+  <span>Ver ›</span>
+</div>
+
+<div class="main">
+
+  <!-- Servicio de hoy -->
+  <div class="today-card" id="today-card">
+    <div class="today-top">
+      <div>
+        <div class="today-label">Hoy</div>
+        <div class="today-date" id="today-date">—</div>
+      </div>
+      <div id="today-badge"></div>
+    </div>
+    <div id="today-service-detail"></div>
+  </div>
+
+  <!-- Próximos días -->
+  <div class="upcoming-section">
+    <div class="section-title">Próximos días</div>
+    <div class="upcoming-list" id="upcoming-list">
+      <div style="color:var(--gris-400);font-size:14px;text-align:center;padding:12px">Cargando...</div>
+    </div>
+  </div>
+
+  <!-- Calendario -->
+  <div class="calendar-card">
+    <div class="section-title">Calendario de servicios</div>
+    <div class="cal-nav">
+      <button class="cal-btn" id="prev-month">&#8249;</button>
+      <span class="cal-month" id="cal-month-label">—</span>
+      <button class="cal-btn" id="next-month">&#8250;</button>
+    </div>
+    <div class="cal-grid" id="cal-grid">
+      <div class="cal-head">Dom</div>
+      <div class="cal-head">Lun</div>
+      <div class="cal-head">Mar</div>
+      <div class="cal-head">Mié</div>
+      <div class="cal-head">Jue</div>
+      <div class="cal-head">Vie</div>
+      <div class="cal-head">Sáb</div>
+    </div>
+  </div>
+
+  <!-- Feed de noticias -->
+  <div id="feed-container">
+    <div style="color:var(--gris-400);font-size:14px;text-align:center;padding:32px">Cargando noticias...</div>
+  </div>
+
+</div>
+
+<!-- Post Modal -->
+<div id="post-modal-overlay" class="post-modal-overlay hidden" role="dialog">
+  <div class="post-modal-box" id="post-modal-box">
+    <div class="post-modal-handle"></div>
+    <div class="post-modal-inner" id="post-modal-inner"></div>
+    <div class="post-modal-footer" id="post-modal-footer"></div>
+  </div>
+</div>
+
+<!-- Service Detail Modal -->
+<div id="service-modal-overlay" class="service-modal-overlay hidden">
+  <div class="service-modal-box" id="service-modal-box"></div>
+</div>
+
+<script type="module" src="js/usuario.js"></script>
+</body>
+</html>
