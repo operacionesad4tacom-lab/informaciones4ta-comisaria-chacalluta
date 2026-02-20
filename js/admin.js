@@ -54,6 +54,7 @@ async function init() {
   setupExcel();
   setupRecipientSearch();
   setupQuickActions();
+  setupUsuarios();
   hideLoading();
 }
 
@@ -64,7 +65,8 @@ const TAB_TITLES = {
   'tab-dashboard': ['Dashboard', 'Resumen del sistema'],
   'tab-posts': ['Publicaciones', 'Comunicados y noticias internas'],
   'tab-servicios': ['Gestión de Servicios', 'Carga y administración de turnos'],
-  'tab-siglas': ['Siglas de Servicio', 'Códigos de turno configurados']
+  'tab-siglas': ['Siglas de Servicio', 'Códigos de turno configurados'],
+  'tab-usuarios': ['Gestión de Usuarios', 'Alta y administración de funcionarios']
 };
 
 function setupNav() {
@@ -541,8 +543,6 @@ async function confirmExcelUpload() {
   if (!excelData?.length) { showToast('No hay datos para cargar', 'error'); return; }
   try {
     showLoading();
-
-    // Cargar siglas y usuarios registrados (usuarios son opcionales ahora)
     const { data: users } = await supabase.from('profiles').select('id,badge_number');
     const { data: siglas } = await supabase.from('service_codes').select('id,code,name,start_time,end_time,is_rest');
 
@@ -550,68 +550,41 @@ async function confirmExcelUpload() {
     const siglaMap = Object.fromEntries((siglas || []).map(s => [String(s.code).trim().toUpperCase(), s]));
 
     const toInsert = [];
-    const erroresSigla = [];
-    const placasSinUsuario = new Set();
+    const errors = [];
 
     for (const s of excelData) {
+      const userId = userMap[s.badge_number];
       const sigla = siglaMap[s.sigla_code];
-
-      // Si la sigla no existe, eso sí es un error real — no podemos saber el horario
-      if (!sigla) {
-        erroresSigla.push(`Sigla desconocida: ${s.sigla_code} (placa ${s.badge_number})`);
-        continue;
-      }
-
-      const userId = userMap[s.badge_number] || null;
-      if (!userId) placasSinUsuario.add(s.badge_number);
-
+      if (!userId) { errors.push(`Placa no encontrada: ${s.badge_number}`); continue; }
+      if (!sigla) { errors.push(`Sigla no encontrada: ${s.sigla_code}`); continue; }
       toInsert.push({
-        user_id: userId,                    // null si la placa no tiene usuario registrado
-        badge_number_raw: s.badge_number,   // siempre guardamos la placa del Excel
-        service_code_id: sigla.id,
-        date: s.date,
+        user_id: userId, service_code_id: sigla.id, date: s.date,
         service_type: sigla.name,
         start_time: sigla.is_rest ? '00:00:00' : (sigla.start_time || '00:00:00'),
-        end_time:   sigla.is_rest ? '00:00:00' : (sigla.end_time   || '00:00:00')
+        end_time: sigla.is_rest ? '00:00:00' : (sigla.end_time || '00:00:00')
       });
     }
 
-    if (erroresSigla.length > 0) console.warn('Siglas no reconocidas:', erroresSigla);
-    if (placasSinUsuario.size > 0) console.info('Placas sin usuario registrado (se cargan igual):', [...placasSinUsuario]);
-
+    if (errors.length > 0) console.warn('Errores en carga:', errors);
     if (!toInsert.length) {
       hideLoading();
-      showToast('No hay servicios válidos. Revisa las siglas del Excel.', 'error');
+      showToast('No hay servicios válidos. Revisa números de placa y siglas.', 'error');
       return;
     }
 
-    // ── PASO 1: Limpiar TODA la tabla antes de insertar ──────────────────
-    // Esto libera espacio en Supabase y evita conflictos de claves únicas.
-    const { error: deleteError } = await supabase
-      .from('services')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000'); // condición siempre verdadera para borrar todo
-
-    if (deleteError) throw new Error('Error al limpiar tabla: ' + deleteError.message);
-
-    // ── PASO 2: Insertar en lotes de 500 para evitar límites de payload ──
-    const BATCH = 500;
-    for (let i = 0; i < toInsert.length; i += BATCH) {
-      const lote = toInsert.slice(i, i + BATCH);
-      const { error: insertError } = await supabase.from('services').insert(lote);
-      if (insertError) throw new Error(`Error insertando lote ${Math.floor(i/BATCH)+1}: ` + insertError.message);
+    // Eliminar servicios existentes en esas fechas para esos usuarios
+    const dates = [...new Set(toInsert.map(s => s.date))];
+    const userIds = [...new Set(toInsert.map(s => s.user_id))];
+    for (const uid of userIds) {
+      await supabase.from('services').delete().eq('user_id', uid).in('date', dates);
     }
 
+    // Insertar nuevos
+    const { error } = await supabase.from('services').insert(toInsert);
+    if (error) throw error;
+
     hideLoading();
-
-    const sinUsuario = placasSinUsuario.size > 0
-      ? ` · ${placasSinUsuario.size} placa(s) sin usuario registrado`
-      : '';
-    const conErrores = erroresSigla.length > 0
-      ? ` · ${erroresSigla.length} sigla(s) desconocida(s), ver consola`
-      : '';
-
-    showToast(`✅ ${toInsert.length} servicios cargados${sinUsuario}${conErrores}`, 'success');
+    showToast(`✅ ${toInsert.length} servicios cargados${errors.length > 0 ? ` (${errors.length} errores, ver consola)` : ''}`, 'success');
     closeModal('excel-modal');
     document.getElementById('excel-preview').style.display = 'none';
     document.getElementById('excel-input').value = '';
@@ -752,3 +725,256 @@ function closeModal(id) { document.getElementById(id)?.classList.add('hidden'); 
 document.getElementById('logout-btn')?.addEventListener('click', logout);
 
 window.addEventListener('DOMContentLoaded', init);
+
+// ════════════════════════════════════════════
+// GESTIÓN DE USUARIOS
+// ════════════════════════════════════════════
+
+const EDGE_FUNCTION_URL = 'https://wscdbfoqexmovuiussaf.supabase.co/functions/v1/manage-user';
+
+let usuariosCache = [];
+let usuarioSearchTimeout = null;
+
+function setupUsuarios() {
+  document.getElementById('create-user-btn')?.addEventListener('click', () => openUserModal(null));
+  document.getElementById('user-search-input')?.addEventListener('input', (e) => {
+    clearTimeout(usuarioSearchTimeout);
+    usuarioSearchTimeout = setTimeout(() => filterUsuarios(e.target.value), 200);
+  });
+  document.getElementById('user-form')?.addEventListener('submit', handleUserFormSubmit);
+  loadUsuarios();
+}
+
+async function loadUsuarios() {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, rank, badge_number, role, email, phone, created_at')
+      .order('full_name');
+    if (error) throw error;
+    usuariosCache = data || [];
+    renderUsuarios(usuariosCache);
+  } catch (e) {
+    console.error('Error cargando usuarios:', e);
+  }
+}
+
+function renderUsuarios(list) {
+  const container = document.getElementById('usuarios-list');
+  if (!container) return;
+
+  if (!list.length) {
+    container.innerHTML = '<div style="text-align:center;padding:48px;color:var(--gris-400)">No hay funcionarios registrados</div>';
+    return;
+  }
+
+  container.innerHTML = list.map(u => `
+    <div class="usuario-row">
+      <div class="usuario-avatar">${u.full_name.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase()}</div>
+      <div class="usuario-info">
+        <div class="usuario-name">${u.full_name}</div>
+        <div class="usuario-meta">
+          ${u.rank ? `<span>${u.rank}</span> · ` : ''}
+          <span>N° ${u.badge_number}</span> ·
+          <span>${u.email}</span>
+        </div>
+      </div>
+      <div class="usuario-badges">
+        <span class="badge ${u.role === 'admin' ? 'badge-urgente' : 'badge-normal'}">${u.role === 'admin' ? '⭐ Admin' : '👤 Funcionario'}</span>
+        ${checkServiciosVinculados(u.badge_number) ? '<span class="badge badge-exito">📅 Servicios</span>' : '<span class="badge" style="background:var(--gris-100);color:var(--gris-500)">Sin servicios</span>'}
+      </div>
+      <div class="usuario-actions">
+        <button class="btn btn-sm btn-secondary" onclick="openUserModal('${u.id}')">✏️ Editar</button>
+        <button class="btn btn-sm btn-primary" onclick="vincularServicios('${u.id}', '${u.badge_number}')">🔗 Vincular</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteUsuario('${u.id}', '${u.full_name}')">🗑️</button>
+      </div>
+    </div>`).join('');
+}
+
+function checkServiciosVinculados(badgeNumber) {
+  // Esta verificación es visual solamente; la real se hace en la BD
+  return false; // se podría mejorar con un campo calculado
+}
+
+function filterUsuarios(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) { renderUsuarios(usuariosCache); return; }
+  const filtered = usuariosCache.filter(u =>
+    u.full_name?.toLowerCase().includes(q) ||
+    u.badge_number?.toLowerCase().includes(q) ||
+    u.rank?.toLowerCase().includes(q) ||
+    u.email?.toLowerCase().includes(q)
+  );
+  renderUsuarios(filtered);
+}
+
+function openUserModal(userId) {
+  const form = document.getElementById('user-form');
+  const title = document.getElementById('user-modal-title');
+  const passGroup = document.getElementById('password-group');
+  const vincularBtn = document.getElementById('vincular-on-create');
+
+  form.reset();
+  document.getElementById('user-id').value = '';
+  document.getElementById('user-password').required = true;
+  passGroup.style.display = 'block';
+
+  if (userId) {
+    const u = usuariosCache.find(u => u.id === userId);
+    if (!u) return;
+    title.textContent = 'Editar Funcionario';
+    document.getElementById('user-id').value = u.id;
+    document.getElementById('user-fullname').value = u.full_name;
+    document.getElementById('user-email').value = u.email;
+    document.getElementById('user-badge').value = u.badge_number;
+    document.getElementById('user-rank').value = u.rank || '';
+    document.getElementById('user-phone').value = u.phone || '';
+    document.getElementById('user-role').value = u.role;
+    document.getElementById('user-password').required = false;
+    passGroup.innerHTML = `
+      <label>Nueva Contraseña <span style="color:var(--gris-400);font-weight:400">(dejar vacío para no cambiar)</span></label>
+      <input type="password" id="user-password" placeholder="••••••••" autocomplete="new-password">`;
+    vincularBtn.style.display = 'flex';
+    vincularBtn.onclick = () => { closeModal('user-modal'); vincularServicios(userId, u.badge_number); };
+  } else {
+    title.textContent = 'Nuevo Funcionario';
+    vincularBtn.style.display = 'none';
+  }
+
+  openModal('user-modal');
+}
+
+async function handleUserFormSubmit(e) {
+  e.preventDefault();
+  const userId = document.getElementById('user-id').value;
+  const isEdit = !!userId;
+
+  const payload = {
+    full_name:    document.getElementById('user-fullname').value.trim(),
+    email:        document.getElementById('user-email').value.trim().toLowerCase(),
+    badge_number: document.getElementById('user-badge').value.trim(),
+    rank:         document.getElementById('user-rank').value.trim(),
+    phone:        document.getElementById('user-phone').value.trim(),
+    role:         document.getElementById('user-role').value,
+    password:     document.getElementById('user-password').value,
+  };
+
+  if (!payload.full_name || !payload.email || !payload.badge_number) {
+    showToast('Nombre, correo y N° placa son obligatorios', 'error'); return;
+  }
+  if (!isEdit && !payload.password) {
+    showToast('La contraseña es obligatoria al crear un usuario', 'error'); return;
+  }
+
+  try {
+    showLoading();
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    const body = isEdit
+      ? { action: 'update', userId, ...payload }
+      : { action: 'create', ...payload };
+
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(body)
+    });
+
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Error en la operación');
+
+    // Si es creación y hay servicios con esa placa sin vincular → vincular automáticamente
+    if (!isEdit && result.userId) {
+      const { data: sinVincular } = await supabase
+        .from('services')
+        .select('id')
+        .eq('badge_number_raw', payload.badge_number)
+        .is('user_id', null);
+
+      if (sinVincular?.length) {
+        await supabase
+          .from('services')
+          .update({ user_id: result.userId })
+          .eq('badge_number_raw', payload.badge_number)
+          .is('user_id', null);
+        showToast(`✅ Usuario creado y ${sinVincular.length} servicios vinculados automáticamente`, 'success');
+      } else {
+        showToast('✅ Usuario creado correctamente', 'success');
+      }
+    } else {
+      showToast(isEdit ? 'Usuario actualizado' : 'Usuario creado', 'success');
+    }
+
+    hideLoading();
+    closeModal('user-modal');
+    await loadUsuarios();
+    allUsers = await getAllUsers(); // refrescar lista para buscador de destinatarios
+    await loadStats();
+  } catch (err) {
+    hideLoading();
+    showToast(err.message || 'Error al guardar usuario', 'error');
+    console.error(err);
+  }
+}
+
+window.vincularServicios = async function(userId, badgeNumber) {
+  try {
+    showLoading();
+    const { data: sinVincular, error } = await supabase
+      .from('services')
+      .select('id')
+      .eq('badge_number_raw', badgeNumber)
+      .is('user_id', null);
+
+    if (error) throw error;
+
+    if (!sinVincular?.length) {
+      hideLoading();
+      showToast(`La placa ${badgeNumber} no tiene servicios pendientes de vincular`, 'info');
+      return;
+    }
+
+    const { error: updateErr } = await supabase
+      .from('services')
+      .update({ user_id: userId })
+      .eq('badge_number_raw', badgeNumber)
+      .is('user_id', null);
+
+    if (updateErr) throw updateErr;
+
+    hideLoading();
+    showToast(`✅ ${sinVincular.length} servicios vinculados a la placa ${badgeNumber}`, 'success');
+    await loadUsuarios();
+  } catch (e) {
+    hideLoading();
+    showToast('Error al vincular servicios: ' + e.message, 'error');
+  }
+};
+
+window.deleteUsuario = async function(userId, fullName) {
+  if (!confirm(`¿Eliminar a ${fullName}? Esta acción no se puede deshacer.`)) return;
+  try {
+    showLoading();
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ action: 'delete', userId })
+    });
+
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Error al eliminar');
+
+    hideLoading();
+    showToast(`${fullName} eliminado correctamente`, 'success');
+    await loadUsuarios();
+    allUsers = await getAllUsers();
+    await loadStats();
+  } catch (e) {
+    hideLoading();
+    showToast('Error al eliminar usuario: ' + e.message, 'error');
+  }
+};
