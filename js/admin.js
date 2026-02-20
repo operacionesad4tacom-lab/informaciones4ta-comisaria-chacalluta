@@ -449,7 +449,9 @@ window.toggleHorarios = function() {
 };
 
 // ════════════════════════════════════════════
-// EXCEL
+// EXCEL — v3.1 — Acepta placas sin usuario registrado
+// Los servicios se guardan con badge_number_raw y se
+// vinculan automáticamente cuando se crea el usuario.
 // ════════════════════════════════════════════
 function setupExcel() {
   const input = document.getElementById('excel-input');
@@ -458,8 +460,10 @@ function setupExcel() {
 
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); if (e.dataTransfer.files[0]) processExcel(e.dataTransfer.files[0]); });
-
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) processExcel(e.dataTransfer.files[0]);
+  });
   input.addEventListener('change', e => { if (e.target.files[0]) processExcel(e.target.files[0]); });
   document.getElementById('confirm-upload-btn')?.addEventListener('click', confirmExcelUpload);
 }
@@ -480,6 +484,11 @@ function excelSerialToDate(serial) {
   return null;
 }
 
+// Normaliza una placa: quita espacios, puntos, guiones y convierte a mayúsculas
+function normalizeBadge(val) {
+  return String(val ?? '').trim().replace(/[\s.\-]/g, '').toUpperCase();
+}
+
 async function processExcel(file) {
   try {
     showLoading();
@@ -488,21 +497,36 @@ async function processExcel(file) {
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
 
-    if (rows.length < 2) { hideLoading(); showToast('El archivo debe tener al menos 2 filas', 'error'); return; }
+    if (rows.length < 2) {
+      hideLoading();
+      showToast('El archivo debe tener al menos 2 filas (encabezado + datos)', 'error');
+      return;
+    }
 
     const headers = rows[0];
     const services = [];
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      if (!row || !row[0]) continue;
-      const badge = String(row[0]).trim();
-      for (let j = 1; j < row.length; j++) {
-        if (!row[j] || !headers[j]) continue;
+      if (!row || row[0] == null || row[0] === '') continue;
+      const badge = normalizeBadge(row[0]);
+      if (!badge) continue;
+
+      for (let j = 1; j < headers.length; j++) {
+        const cellVal = row[j];
+        if (cellVal == null || cellVal === '') continue;
         const dateStr = excelSerialToDate(headers[j]);
         if (!dateStr) continue;
-        services.push({ badge_number: badge, date: dateStr, sigla_code: String(row[j]).trim().toUpperCase() });
+        const siglaCode = String(cellVal).trim().toUpperCase();
+        if (!siglaCode) continue;
+        services.push({ badge_number: badge, date: dateStr, sigla_code: siglaCode });
       }
+    }
+
+    if (!services.length) {
+      hideLoading();
+      showToast('No se encontraron datos válidos en el archivo', 'error');
+      return;
     }
 
     excelData = services;
@@ -511,7 +535,7 @@ async function processExcel(file) {
   } catch (e) {
     hideLoading();
     console.error('Error Excel:', e);
-    showToast('Error al leer el archivo Excel', 'error');
+    showToast('Error al leer el archivo Excel: ' + e.message, 'error');
   }
 }
 
@@ -525,7 +549,7 @@ function showExcelPreview(data, filename) {
   document.getElementById('excel-stats').innerHTML = `
     <div style="background:var(--verde-claro);padding:14px;border-radius:10px;text-align:center">
       <div style="font-size:24px;font-weight:900;color:var(--verde-oscuro)">${uniqueUsers.length}</div>
-      <div style="font-size:12px;color:var(--gris-600)">Funcionarios</div>
+      <div style="font-size:12px;color:var(--gris-600)">Placas detectadas</div>
     </div>
     <div style="background:var(--normal-bg);padding:14px;border-radius:10px;text-align:center">
       <div style="font-size:24px;font-weight:900;color:var(--normal)">${uniqueDates.length}</div>
@@ -533,7 +557,7 @@ function showExcelPreview(data, filename) {
     </div>`;
 
   document.getElementById('preview-rows').innerHTML = data.slice(0, 15).map(s =>
-    `<div class="preview-row">N° ${s.badge_number} &rarr; ${s.date} &rarr; <strong>${s.sigla_code}</strong></div>`
+    `<div class="preview-row">N° ${s.badge_number} → ${s.date} → <strong>${s.sigla_code}</strong></div>`
   ).join('') + (data.length > 15 ? `<div class="preview-row" style="color:var(--gris-400)">...y ${data.length - 15} más</div>` : '');
 
   preview.style.display = 'block';
@@ -541,59 +565,117 @@ function showExcelPreview(data, filename) {
 
 async function confirmExcelUpload() {
   if (!excelData?.length) { showToast('No hay datos para cargar', 'error'); return; }
+
   try {
     showLoading();
-    const { data: users } = await supabase.from('profiles').select('id,badge_number');
-    const { data: siglas } = await supabase.from('service_codes').select('id,code,name,start_time,end_time,is_rest');
 
-    const userMap = Object.fromEntries((users || []).map(u => [String(u.badge_number).trim(), u.id]));
-    const siglaMap = Object.fromEntries((siglas || []).map(s => [String(s.code).trim().toUpperCase(), s]));
+    // ── 1. Cargar perfiles y siglas desde Supabase ──
+    const [{ data: users, error: usersErr }, { data: siglas, error: siglasErr }] = await Promise.all([
+      supabase.from('profiles').select('id, badge_number'),
+      supabase.from('service_codes').select('id, code, name, start_time, end_time, is_rest').eq('is_active', true)
+    ]);
 
-    const toInsert = [];
-    const errors = [];
+    if (usersErr) throw new Error('No se pudo cargar la lista de usuarios: ' + usersErr.message);
+    if (siglasErr) throw new Error('No se pudo cargar las siglas: ' + siglasErr.message);
+
+    // ── 2. Construir mapas con normalización ──
+    // Clave normalizada → id de usuario
+    const userMap = Object.fromEntries(
+      (users || []).map(u => [normalizeBadge(u.badge_number), u.id])
+    );
+    // Código en mayúsculas → objeto sigla
+    const siglaMap = Object.fromEntries(
+      (siglas || []).map(s => [String(s.code).trim().toUpperCase(), s])
+    );
+
+    // ── 3. Clasificar servicios ──
+    const toInsert = [];       // tienen usuario registrado
+    const sinUsuario = [];     // placa no encontrada en profiles → igual se insertan
+    const sinSigla = [];       // sigla desconocida → se descartan
 
     for (const s of excelData) {
-      const userId = userMap[s.badge_number];
       const sigla = siglaMap[s.sigla_code];
-      if (!userId) { errors.push(`Placa no encontrada: ${s.badge_number}`); continue; }
-      if (!sigla) { errors.push(`Sigla no encontrada: ${s.sigla_code}`); continue; }
+      if (!sigla) {
+        sinSigla.push(s.sigla_code);
+        continue;
+      }
+
+      const userId = userMap[s.badge_number] || null;
+      if (!userId) sinUsuario.push(s.badge_number);
+
       toInsert.push({
-        user_id: userId, service_code_id: sigla.id, date: s.date,
-        service_type: sigla.name,
-        start_time: sigla.is_rest ? '00:00:00' : (sigla.start_time || '00:00:00'),
-        end_time: sigla.is_rest ? '00:00:00' : (sigla.end_time || '00:00:00')
+        user_id:         userId,           // null si aún no tiene cuenta
+        badge_number_raw: s.badge_number,  // siempre guardamos la placa
+        service_code_id: sigla.id,
+        date:            s.date,
+        service_type:    sigla.name,
+        start_time:      sigla.is_rest ? '00:00:00' : (sigla.start_time || '00:00:00'),
+        end_time:        sigla.is_rest ? '00:00:00' : (sigla.end_time || '00:00:00')
       });
     }
 
-    if (errors.length > 0) console.warn('Errores en carga:', errors);
     if (!toInsert.length) {
       hideLoading();
-      showToast('No hay servicios válidos. Revisa números de placa y siglas.', 'error');
+      // Mostrar qué siglas fallaron para que el admin pueda corregir
+      const siglasUnicas = [...new Set(sinSigla)].slice(0, 10).join(', ');
+      showToast(`No hay servicios válidos. Siglas no reconocidas: ${siglasUnicas}`, 'error');
       return;
     }
 
-    // Eliminar servicios existentes en esas fechas para esos usuarios
-    const dates = [...new Set(toInsert.map(s => s.date))];
-    const userIds = [...new Set(toInsert.map(s => s.user_id))];
-    for (const uid of userIds) {
-      await supabase.from('services').delete().eq('user_id', uid).in('date', dates);
+    // ── 4. Borrar servicios previos solo de las combinaciones placa+fecha ──
+    // Se borran por badge_number_raw para no perder datos de usuarios existentes
+    // que NO estén en este Excel.
+    const badgesEnExcel = [...new Set(toInsert.map(s => s.badge_number_raw))];
+    const datesEnExcel  = [...new Set(toInsert.map(s => s.date))];
+
+    // Borrar en lotes de 50 placas para no superar límites de URL
+    const LOTE = 50;
+    for (let i = 0; i < badgesEnExcel.length; i += LOTE) {
+      const lote = badgesEnExcel.slice(i, i + LOTE);
+      await supabase
+        .from('services')
+        .delete()
+        .in('badge_number_raw', lote)
+        .in('date', datesEnExcel);
     }
 
-    // Insertar nuevos
-    const { error } = await supabase.from('services').insert(toInsert);
-    if (error) throw error;
+    // ── 5. Insertar en lotes de 500 (límite Supabase) ──
+    const BATCH = 500;
+    for (let i = 0; i < toInsert.length; i += BATCH) {
+      const { error } = await supabase.from('services').insert(toInsert.slice(i, i + BATCH));
+      if (error) throw error;
+    }
 
+    // ── 6. Resultado ──
     hideLoading();
-    showToast(`✅ ${toInsert.length} servicios cargados${errors.length > 0 ? ` (${errors.length} errores, ver consola)` : ''}`, 'success');
+
+    const sinUsuarioUnicos = [...new Set(sinUsuario)];
+    const siglasInvalidas  = [...new Set(sinSigla)];
+
+    let msg = `✅ ${toInsert.length} servicios cargados correctamente.`;
+    if (sinUsuarioUnicos.length) {
+      msg += ` ${sinUsuarioUnicos.length} placa(s) sin usuario registrado (quedarán vinculadas al crear la cuenta).`;
+    }
+    if (siglasInvalidas.length) {
+      msg += ` ${siglasInvalidas.length} sigla(s) desconocidas omitidas.`;
+    }
+
+    showToast(msg, sinUsuarioUnicos.length || siglasInvalidas.length ? 'warning' : 'success');
+
+    // Mostrar resumen detallado en consola
+    if (sinUsuarioUnicos.length) console.info('Placas sin usuario (se guardan igual):', sinUsuarioUnicos);
+    if (siglasInvalidas.length)  console.warn('Siglas no reconocidas (descartadas):', siglasInvalidas);
+
     closeModal('excel-modal');
     document.getElementById('excel-preview').style.display = 'none';
     document.getElementById('excel-input').value = '';
     excelData = null;
     await loadStats();
+
   } catch (e) {
     hideLoading();
     console.error('Error carga Excel:', e);
-    showToast('Error al cargar servicios: ' + (e.message || ''), 'error');
+    showToast('Error al cargar servicios: ' + (e.message || 'Error desconocido'), 'error');
   }
 }
 
