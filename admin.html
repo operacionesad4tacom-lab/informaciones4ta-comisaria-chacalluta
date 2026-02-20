@@ -147,12 +147,8 @@
     .radio-opt input { width: auto; margin: 0; }
 
     /* ── RECIPIENT SEARCH ── */
-    .recipient-search-box {
-      position: relative; margin-bottom: 12px;
-    }
-    .recipient-search-input {
-      padding-left: 40px !important;
-    }
+    .recipient-search-box { position: relative; margin-bottom: 12px; }
+    .recipient-search-input { padding-left: 40px !important; }
     .recipient-search-icon {
       position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
       color: var(--gris-400); font-size: 16px; pointer-events: none;
@@ -195,10 +191,34 @@
     }
     .file-preview-box.show { display: flex; }
 
+    /* ── USUARIOS ── */
+    .usuario-row {
+      display: flex; align-items: center; gap: 14px;
+      background: white; border: 1.5px solid var(--gris-200);
+      border-radius: 14px; padding: 14px 18px; transition: box-shadow 0.2s;
+    }
+    .usuario-row:hover { box-shadow: var(--sombra-md); }
+    .usuario-avatar {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--verde-medio), var(--verde-oscuro));
+      color: white; font-weight: 800; font-size: 15px;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .usuario-info { flex: 1; min-width: 0; }
+    .usuario-name { font-weight: 700; color: var(--gris-800); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .usuario-meta { font-size: 12px; color: var(--gris-500); margin-top: 2px; }
+    .usuario-badges { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+    .usuario-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
     /* ── RESPONSIVE ── */
     @media (max-width: 900px) {
       .sidebar { display: none; }
       .stats-grid { grid-template-columns: repeat(2,1fr); }
+    }
+    @media (max-width: 768px) {
+      .usuario-row { flex-wrap: wrap; }
+      .usuario-actions { width: 100%; justify-content: flex-end; }
+      .usuario-badges { width: 100%; }
     }
     @media (max-width: 600px) {
       .content { padding: 16px; }
@@ -211,7 +231,7 @@
 
 <div class="layout">
 
-  <!-- SIDEBAR -->
+  <!-- ═══════════════════ SIDEBAR ═══════════════════ -->
   <aside class="sidebar">
     <div class="sidebar-logo">
       <img src="https://res.cloudinary.com/dw61kjdzf/image/upload/v1771156496/escudo-carabineros.png_dnb80x.png" alt="Escudo" onerror="this.style.display='none'">
@@ -232,7 +252,11 @@
       <button class="nav-item" data-tab="tab-servicios">
         <span class="nav-icon">📅</span> Servicios
       </button>
-      <div class="nav-label" style="margin-top:12px">Configuración</div>
+
+      <div class="nav-label" style="margin-top:12px">Administración</div>
+      <button class="nav-item" data-tab="tab-usuarios">
+        <span class="nav-icon">👥</span> Funcionarios
+      </button>
       <button class="nav-item" data-tab="tab-siglas">
         <span class="nav-icon">🏷️</span> Siglas
       </button>
@@ -250,7 +274,7 @@
     </div>
   </aside>
 
-  <!-- MAIN -->
+  <!-- ═══════════════════ MAIN ═══════════════════ -->
   <div class="main-area">
     <div class="topbar">
       <div>
@@ -262,7 +286,7 @@
 
     <div class="content">
 
-      <!-- DASHBOARD -->
+      <!-- ════════════ TAB: DASHBOARD ════════════ -->
       <div id="tab-dashboard" class="tab-panel active">
         <div class="stats-grid">
           <div class="stat-card">
@@ -288,11 +312,12 @@
             <button class="btn btn-primary" id="quick-post-btn">✏️ Nueva publicación</button>
             <button class="btn btn-secondary" id="quick-excel-btn">📊 Cargar servicios Excel</button>
             <button class="btn btn-secondary" id="quick-sigla-btn">🏷️ Nueva sigla</button>
+            <button class="btn btn-secondary" id="quick-user-btn">👤 Nuevo funcionario</button>
           </div>
         </div>
       </div>
 
-      <!-- PUBLICACIONES -->
+      <!-- ════════════ TAB: PUBLICACIONES ════════════ -->
       <div id="tab-posts" class="tab-panel">
         <div class="section-header">
           <div>
@@ -306,7 +331,7 @@
         </div>
       </div>
 
-      <!-- SERVICIOS -->
+      <!-- ════════════ TAB: SERVICIOS ════════════ -->
       <div id="tab-servicios" class="tab-panel">
         <div class="section-header">
           <div>
@@ -317,7 +342,11 @@
         </div>
         <div style="background:white;border-radius:16px;padding:24px;box-shadow:var(--sombra-sm)">
           <h4 style="margin-bottom:8px">Formato del archivo Excel</h4>
-          <p style="font-size:14px;color:var(--gris-600)">La primera columna debe contener el <strong>número de placa</strong> del funcionario. Las columnas siguientes deben ser fechas con la <strong>sigla del servicio</strong> en cada celda.</p>
+          <p style="font-size:14px;color:var(--gris-600)">
+            La primera columna debe contener el <strong>número de placa</strong> del funcionario.
+            Las columnas siguientes deben ser fechas con la <strong>sigla del servicio</strong> en cada celda.
+            Las placas sin cuenta creada se guardan igual y se vinculan automáticamente cuando se cree el usuario.
+          </p>
           <div style="background:var(--gris-50);border-radius:10px;padding:16px;margin-top:12px;font-family:monospace;font-size:13px;overflow-x:auto">
             <div style="display:grid;grid-template-columns:repeat(5,auto);gap:8px 16px;color:var(--gris-700)">
               <strong>Placa</strong><strong>01-Feb</strong><strong>02-Feb</strong><strong>03-Feb</strong><strong>04-Feb</strong>
@@ -325,10 +354,39 @@
               <span>123456T</span><span>B</span><span>D</span><span>A</span><span>F</span>
             </div>
           </div>
+          <div style="margin-top:16px;padding:12px 16px;background:var(--importante-bg);border-radius:10px;font-size:13px;color:#92400e">
+            ⚠️ <strong>Importante:</strong> cada carga reemplaza <em>todos</em> los servicios existentes. Sube siempre la planilla completa del período.
+          </div>
         </div>
       </div>
 
-      <!-- SIGLAS -->
+      <!-- ════════════ TAB: FUNCIONARIOS ════════════ -->
+      <div id="tab-usuarios" class="tab-panel">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Funcionarios</div>
+            <div class="section-desc">Alta y administración de cuentas de acceso</div>
+          </div>
+          <button class="btn btn-primary" id="create-user-btn">➕ Nuevo Funcionario</button>
+        </div>
+
+        <!-- Buscador -->
+        <div style="margin-bottom:16px">
+          <input
+            type="search"
+            id="user-search-input"
+            placeholder="🔍 Buscar por nombre, N° placa, grado o correo..."
+            style="max-width:480px"
+          >
+        </div>
+
+        <!-- Lista -->
+        <div id="usuarios-list" style="display:flex;flex-direction:column;gap:10px">
+          <div style="text-align:center;padding:48px;color:var(--gris-400)">Cargando funcionarios…</div>
+        </div>
+      </div>
+
+      <!-- ════════════ TAB: SIGLAS ════════════ -->
       <div id="tab-siglas" class="tab-panel">
         <div class="section-header">
           <div>
@@ -347,9 +405,9 @@
 </div><!-- /layout -->
 
 
-<!-- ═══════════════════════════════════════ -->
-<!-- MODAL: NUEVA PUBLICACIÓN               -->
-<!-- ═══════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════ -->
+<!-- MODAL: NUEVA PUBLICACIÓN                          -->
+<!-- ══════════════════════════════════════════════════ -->
 <div id="create-post-modal" class="modal hidden">
   <div class="modal-content" style="max-width:700px">
     <div class="modal-header">
@@ -444,9 +502,9 @@
 </div>
 
 
-<!-- ═══════════════════════════════════════ -->
-<!-- MODAL: SIGLA                           -->
-<!-- ═══════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════ -->
+<!-- MODAL: SIGLA                                      -->
+<!-- ══════════════════════════════════════════════════ -->
 <div id="sigla-modal" class="modal hidden">
   <div class="modal-content" style="max-width:480px">
     <div class="modal-header">
@@ -518,9 +576,9 @@
 </div>
 
 
-<!-- ═══════════════════════════════════════ -->
-<!-- MODAL: EXCEL                           -->
-<!-- ═══════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════ -->
+<!-- MODAL: EXCEL                                      -->
+<!-- ══════════════════════════════════════════════════ -->
 <div id="excel-modal" class="modal hidden">
   <div class="modal-content" style="max-width:640px">
     <div class="modal-header">
@@ -551,7 +609,80 @@
   </div>
 </div>
 
-<!-- SheetJS for Excel -->
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- MODAL: CREAR / EDITAR FUNCIONARIO                 -->
+<!-- ══════════════════════════════════════════════════ -->
+<div id="user-modal" class="modal hidden">
+  <div class="modal-content" style="max-width:520px">
+    <div class="modal-header">
+      <h2 id="user-modal-title">Nuevo Funcionario</h2>
+      <button class="close-modal-btn" data-close="user-modal">✕</button>
+    </div>
+
+    <form id="user-form" autocomplete="off">
+      <input type="hidden" id="user-id">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+
+        <div class="form-group" style="grid-column:1/-1">
+          <label for="user-fullname">Nombre Completo *</label>
+          <input type="text" id="user-fullname" placeholder="Juan Antonio Pérez Soto" required>
+        </div>
+
+        <div class="form-group">
+          <label for="user-email">Correo Electrónico *</label>
+          <input type="email" id="user-email" placeholder="correo@ejemplo.cl" required>
+        </div>
+
+        <div class="form-group" id="password-group">
+          <label for="user-password">Contraseña *</label>
+          <input type="password" id="user-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+        </div>
+
+        <div class="form-group">
+          <label for="user-badge">N° de Placa *</label>
+          <input type="text" id="user-badge" placeholder="12345T" required>
+        </div>
+
+        <div class="form-group">
+          <label for="user-rank">Grado</label>
+          <input type="text" id="user-rank" placeholder="Cabo 1°, Carabinero...">
+        </div>
+
+        <div class="form-group">
+          <label for="user-phone">Teléfono</label>
+          <input type="tel" id="user-phone" placeholder="+56 9 1234 5678">
+        </div>
+
+        <div class="form-group">
+          <label for="user-role">Rol en el sistema</label>
+          <select id="user-role">
+            <option value="funcionario">👤 Funcionario</option>
+            <option value="admin">⭐ Administrador</option>
+          </select>
+        </div>
+
+      </div>
+
+      <!-- Alerta de vinculación (solo modo edición) -->
+      <div id="vincular-on-create" style="display:none;align-items:center;gap:10px;margin-bottom:16px;padding:12px;background:var(--verde-claro);border-radius:10px">
+        <span style="font-size:14px;color:var(--verde-oscuro);flex:1">
+          ¿Hay servicios cargados con esta placa sin vincular?
+        </span>
+        <button type="button" class="btn btn-sm btn-primary">🔗 Vincular ahora</button>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+        <button type="button" class="btn btn-secondary" data-close="user-modal">Cancelar</button>
+        <button type="submit" class="btn btn-primary">💾 Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+<!-- SheetJS para leer Excel -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
 <script type="module" src="js/admin.js"></script>
 </body>
