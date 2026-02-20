@@ -541,6 +541,8 @@ async function confirmExcelUpload() {
   if (!excelData?.length) { showToast('No hay datos para cargar', 'error'); return; }
   try {
     showLoading();
+
+    // Cargar siglas y usuarios registrados (usuarios son opcionales ahora)
     const { data: users } = await supabase.from('profiles').select('id,badge_number');
     const { data: siglas } = await supabase.from('service_codes').select('id,code,name,start_time,end_time,is_rest');
 
@@ -548,41 +550,68 @@ async function confirmExcelUpload() {
     const siglaMap = Object.fromEntries((siglas || []).map(s => [String(s.code).trim().toUpperCase(), s]));
 
     const toInsert = [];
-    const errors = [];
+    const erroresSigla = [];
+    const placasSinUsuario = new Set();
 
     for (const s of excelData) {
-      const userId = userMap[s.badge_number];
       const sigla = siglaMap[s.sigla_code];
-      if (!userId) { errors.push(`Placa no encontrada: ${s.badge_number}`); continue; }
-      if (!sigla) { errors.push(`Sigla no encontrada: ${s.sigla_code}`); continue; }
+
+      // Si la sigla no existe, eso sí es un error real — no podemos saber el horario
+      if (!sigla) {
+        erroresSigla.push(`Sigla desconocida: ${s.sigla_code} (placa ${s.badge_number})`);
+        continue;
+      }
+
+      const userId = userMap[s.badge_number] || null;
+      if (!userId) placasSinUsuario.add(s.badge_number);
+
       toInsert.push({
-        user_id: userId, service_code_id: sigla.id, date: s.date,
+        user_id: userId,                    // null si la placa no tiene usuario registrado
+        badge_number_raw: s.badge_number,   // siempre guardamos la placa del Excel
+        service_code_id: sigla.id,
+        date: s.date,
         service_type: sigla.name,
         start_time: sigla.is_rest ? '00:00:00' : (sigla.start_time || '00:00:00'),
-        end_time: sigla.is_rest ? '00:00:00' : (sigla.end_time || '00:00:00')
+        end_time:   sigla.is_rest ? '00:00:00' : (sigla.end_time   || '00:00:00')
       });
     }
 
-    if (errors.length > 0) console.warn('Errores en carga:', errors);
+    if (erroresSigla.length > 0) console.warn('Siglas no reconocidas:', erroresSigla);
+    if (placasSinUsuario.size > 0) console.info('Placas sin usuario registrado (se cargan igual):', [...placasSinUsuario]);
+
     if (!toInsert.length) {
       hideLoading();
-      showToast('No hay servicios válidos. Revisa números de placa y siglas.', 'error');
+      showToast('No hay servicios válidos. Revisa las siglas del Excel.', 'error');
       return;
     }
 
-    // Eliminar servicios existentes en esas fechas para esos usuarios
-    const dates = [...new Set(toInsert.map(s => s.date))];
-    const userIds = [...new Set(toInsert.map(s => s.user_id))];
-    for (const uid of userIds) {
-      await supabase.from('services').delete().eq('user_id', uid).in('date', dates);
+    // ── PASO 1: Limpiar TODA la tabla antes de insertar ──────────────────
+    // Esto libera espacio en Supabase y evita conflictos de claves únicas.
+    const { error: deleteError } = await supabase
+      .from('services')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000'); // condición siempre verdadera para borrar todo
+
+    if (deleteError) throw new Error('Error al limpiar tabla: ' + deleteError.message);
+
+    // ── PASO 2: Insertar en lotes de 500 para evitar límites de payload ──
+    const BATCH = 500;
+    for (let i = 0; i < toInsert.length; i += BATCH) {
+      const lote = toInsert.slice(i, i + BATCH);
+      const { error: insertError } = await supabase.from('services').insert(lote);
+      if (insertError) throw new Error(`Error insertando lote ${Math.floor(i/BATCH)+1}: ` + insertError.message);
     }
 
-    // Insertar nuevos
-    const { error } = await supabase.from('services').insert(toInsert);
-    if (error) throw error;
-
     hideLoading();
-    showToast(`✅ ${toInsert.length} servicios cargados${errors.length > 0 ? ` (${errors.length} errores, ver consola)` : ''}`, 'success');
+
+    const sinUsuario = placasSinUsuario.size > 0
+      ? ` · ${placasSinUsuario.size} placa(s) sin usuario registrado`
+      : '';
+    const conErrores = erroresSigla.length > 0
+      ? ` · ${erroresSigla.length} sigla(s) desconocida(s), ver consola`
+      : '';
+
+    showToast(`✅ ${toInsert.length} servicios cargados${sinUsuario}${conErrores}`, 'success');
     closeModal('excel-modal');
     document.getElementById('excel-preview').style.display = 'none';
     document.getElementById('excel-input').value = '';
