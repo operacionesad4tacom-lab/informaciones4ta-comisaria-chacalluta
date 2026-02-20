@@ -449,9 +449,10 @@ window.toggleHorarios = function() {
 };
 
 // ════════════════════════════════════════════
-// EXCEL — v3.2 DEFINITIVO
-// Estrategia: DELETE explícito por badge+fecha, luego INSERT limpio.
+// EXCEL — v3.3 DEFINITIVO
+// Estrategia: DELETE por badge+fecha, luego UPSERT por lotes.
 // Acepta placas sin usuario registrado (user_id = null).
+// Soporta fechas DD/MM/YYYY (texto) y número serial Excel.
 // ════════════════════════════════════════════
 function setupExcel() {
   const input = document.getElementById('excel-input');
@@ -475,18 +476,34 @@ function normalizeBadge(val) {
 }
 
 function excelSerialToDate(serial) {
+  if (serial == null) return null;
+
+  // YYYY-MM-DD (ya normalizado)
   if (typeof serial === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(serial)) return serial;
+
+  // DD/MM/YYYY (formato del Excel de la unidad)
+  if (typeof serial === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(serial)) {
+    const [d, m, y] = serial.split('/');
+    return `${y}-${m}-${d}`;
+  }
+
+  // Número serial Excel (fecha almacenada como número)
   if (typeof serial === 'number') {
     const d = new Date(new Date(1899, 11, 30).getTime() + serial * 86400000);
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
+
+  // Objeto Date (cuando SheetJS parsea con cellDates:true)
   if (serial instanceof Date) {
     return `${serial.getFullYear()}-${String(serial.getMonth()+1).padStart(2,'0')}-${String(serial.getDate()).padStart(2,'0')}`;
   }
+
+  // Cualquier otro string con fecha parseable
   if (typeof serial === 'string') {
     const d = new Date(serial);
     if (!isNaN(d)) return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
+
   return null;
 }
 
@@ -619,11 +636,10 @@ async function confirmExcelUpload() {
     }
 
     // ── 4. Borrar registros previos que serán reemplazados ──────────────
-    // Se identifican por badge_number_raw + fecha (no por user_id, que puede ser null)
     const allBadges = [...new Set(toInsert.map(s => s.badge_number_raw))];
     const allDates  = [...new Set(toInsert.map(s => s.date))];
 
-    // Borrar en lotes de 40 placas (evitar URLs largas)
+    // Borrar por badge_number_raw en lotes de 40
     const LOTE_DELETE = 40;
     for (let i = 0; i < allBadges.length; i += LOTE_DELETE) {
       const lote = allBadges.slice(i, i + LOTE_DELETE);
@@ -632,32 +648,37 @@ async function confirmExcelUpload() {
         .delete()
         .in('badge_number_raw', lote)
         .in('date', allDates);
-      if (delErr) console.warn('[Excel] Error borrando lote:', delErr.message);
+      if (delErr) console.warn('[Excel] Error borrando por badge:', delErr.message);
     }
 
-    // También borrar por user_id para usuarios que ya existían antes
-    // (sus registros anteriores pueden no tener badge_number_raw todavía)
+    // También borrar por user_id (registros anteriores sin badge_number_raw)
     const userIdsConServicios = [...new Set(
       toInsert.filter(s => s.user_id).map(s => s.user_id)
     )];
     if (userIdsConServicios.length) {
-      const LOTE_UID = 40;
-      for (let i = 0; i < userIdsConServicios.length; i += LOTE_UID) {
-        const lote = userIdsConServicios.slice(i, i + LOTE_UID);
-        await supabase
+      for (let i = 0; i < userIdsConServicios.length; i += 40) {
+        const lote = userIdsConServicios.slice(i, i + 40);
+        const { error: delErr2 } = await supabase
           .from('services')
           .delete()
           .in('user_id', lote)
           .in('date', allDates);
+        if (delErr2) console.warn('[Excel] Error borrando por user_id:', delErr2.message);
       }
     }
 
-    // ── 5. Insertar en lotes de 500 ─────────────────────────────────────
+    // ── 5. UPSERT en lotes de 500 ────────────────────────────────────────
+    // Usa upsert para evitar conflictos entre lotes del mismo archivo
     const BATCH = 500;
     let insertados = 0;
     for (let i = 0; i < toInsert.length; i += BATCH) {
       const lote = toInsert.slice(i, i + BATCH);
-      const { error: insErr } = await supabase.from('services').insert(lote);
+      const { error: insErr } = await supabase
+        .from('services')
+        .upsert(lote, {
+          onConflict: 'badge_number_raw,date',
+          ignoreDuplicates: false
+        });
       if (insErr) throw new Error(`Error insertando lote ${i/BATCH + 1}: ${insErr.message} (code: ${insErr.code})`);
       insertados += lote.length;
     }
