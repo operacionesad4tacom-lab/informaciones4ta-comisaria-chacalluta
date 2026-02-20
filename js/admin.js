@@ -449,23 +449,29 @@ window.toggleHorarios = function() {
 };
 
 // ════════════════════════════════════════════
-// EXCEL — v3.1 — Acepta placas sin usuario registrado
-// Los servicios se guardan con badge_number_raw y se
-// vinculan automáticamente cuando se crea el usuario.
+// EXCEL — v3.2 DEFINITIVO
+// Estrategia: DELETE explícito por badge+fecha, luego INSERT limpio.
+// Acepta placas sin usuario registrado (user_id = null).
 // ════════════════════════════════════════════
 function setupExcel() {
   const input = document.getElementById('excel-input');
-  const zone = document.getElementById('excel-drop-zone');
+  const zone  = document.getElementById('excel-drop-zone');
   if (!input || !zone) return;
 
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
   zone.addEventListener('drop', e => {
-    e.preventDefault(); zone.classList.remove('drag-over');
+    e.preventDefault();
+    zone.classList.remove('drag-over');
     if (e.dataTransfer.files[0]) processExcel(e.dataTransfer.files[0]);
   });
   input.addEventListener('change', e => { if (e.target.files[0]) processExcel(e.target.files[0]); });
   document.getElementById('confirm-upload-btn')?.addEventListener('click', confirmExcelUpload);
+}
+
+// Normaliza placa: quita espacios/puntos/guiones, mayúsculas
+function normalizeBadge(val) {
+  return String(val ?? '').trim().replace(/[\s.\-]/g, '').toUpperCase();
 }
 
 function excelSerialToDate(serial) {
@@ -484,26 +490,21 @@ function excelSerialToDate(serial) {
   return null;
 }
 
-// Normaliza una placa: quita espacios, puntos, guiones y convierte a mayúsculas
-function normalizeBadge(val) {
-  return String(val ?? '').trim().replace(/[\s.\-]/g, '').toUpperCase();
-}
-
 async function processExcel(file) {
   try {
     showLoading();
     const buffer = await file.arrayBuffer();
-    const wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: false, raw: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+    const wb   = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: false, raw: true });
+    const ws   = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
 
     if (rows.length < 2) {
       hideLoading();
-      showToast('El archivo debe tener al menos 2 filas (encabezado + datos)', 'error');
+      showToast('El archivo necesita al menos 2 filas (encabezado + datos)', 'error');
       return;
     }
 
-    const headers = rows[0];
+    const headers  = rows[0];
     const services = [];
 
     for (let i = 1; i < rows.length; i++) {
@@ -515,7 +516,7 @@ async function processExcel(file) {
       for (let j = 1; j < headers.length; j++) {
         const cellVal = row[j];
         if (cellVal == null || cellVal === '') continue;
-        const dateStr = excelSerialToDate(headers[j]);
+        const dateStr  = excelSerialToDate(headers[j]);
         if (!dateStr) continue;
         const siglaCode = String(cellVal).trim().toUpperCase();
         if (!siglaCode) continue;
@@ -535,16 +536,16 @@ async function processExcel(file) {
   } catch (e) {
     hideLoading();
     console.error('Error Excel:', e);
-    showToast('Error al leer el archivo Excel: ' + e.message, 'error');
+    showToast('Error al leer el Excel: ' + e.message, 'error');
   }
 }
 
 function showExcelPreview(data, filename) {
-  const preview = document.getElementById('excel-preview');
-  const uniqueUsers = [...new Set(data.map(s => s.badge_number))];
-  const uniqueDates = [...new Set(data.map(s => s.date))];
+  const preview      = document.getElementById('excel-preview');
+  const uniqueUsers  = [...new Set(data.map(s => s.badge_number))];
+  const uniqueDates  = [...new Set(data.map(s => s.date))];
 
-  document.getElementById('excel-count-badge').textContent = `${data.length} servicios`;
+  document.getElementById('excel-count-badge').textContent   = `${data.length} servicios`;
   document.getElementById('excel-preview-title').textContent = filename;
   document.getElementById('excel-stats').innerHTML = `
     <div style="background:var(--verde-claro);padding:14px;border-radius:10px;text-align:center">
@@ -556,9 +557,11 @@ function showExcelPreview(data, filename) {
       <div style="font-size:12px;color:var(--gris-600)">Días</div>
     </div>`;
 
-  document.getElementById('preview-rows').innerHTML = data.slice(0, 15).map(s =>
-    `<div class="preview-row">N° ${s.badge_number} → ${s.date} → <strong>${s.sigla_code}</strong></div>`
-  ).join('') + (data.length > 15 ? `<div class="preview-row" style="color:var(--gris-400)">...y ${data.length - 15} más</div>` : '');
+  document.getElementById('preview-rows').innerHTML =
+    data.slice(0, 15).map(s =>
+      `<div class="preview-row">N° ${s.badge_number} → ${s.date} → <strong>${s.sigla_code}</strong></div>`
+    ).join('') +
+    (data.length > 15 ? `<div class="preview-row" style="color:var(--gris-400)">...y ${data.length - 15} más</div>` : '');
 
   preview.style.display = 'block';
 }
@@ -569,102 +572,110 @@ async function confirmExcelUpload() {
   try {
     showLoading();
 
-    // ── 1. Cargar perfiles y siglas desde Supabase ──
+    // ── 1. Cargar perfiles (todas las placas) y siglas ──────────────────
     const [{ data: users, error: usersErr }, { data: siglas, error: siglasErr }] = await Promise.all([
       supabase.from('profiles').select('id, badge_number'),
       supabase.from('service_codes').select('id, code, name, start_time, end_time, is_rest').eq('is_active', true)
     ]);
 
-    if (usersErr) throw new Error('No se pudo cargar la lista de usuarios: ' + usersErr.message);
-    if (siglasErr) throw new Error('No se pudo cargar las siglas: ' + siglasErr.message);
+    if (usersErr)  throw new Error('No se pudo leer perfiles: ' + usersErr.message);
+    if (siglasErr) throw new Error('No se pudo leer siglas: ' + siglasErr.message);
 
-    // ── 2. Construir mapas con normalización ──
-    // Clave normalizada → id de usuario
-    const userMap = Object.fromEntries(
-      (users || []).map(u => [normalizeBadge(u.badge_number), u.id])
-    );
-    // Código en mayúsculas → objeto sigla
-    const siglaMap = Object.fromEntries(
-      (siglas || []).map(s => [String(s.code).trim().toUpperCase(), s])
-    );
+    // Diagnóstico: si users está vacío es problema de RLS
+    console.info(`[Excel] Perfiles cargados: ${users?.length ?? 0} | Siglas: ${siglas?.length ?? 0}`);
 
-    // ── 3. Clasificar servicios ──
-    const toInsert = [];       // tienen usuario registrado
-    const sinUsuario = [];     // placa no encontrada en profiles → igual se insertan
-    const sinSigla = [];       // sigla desconocida → se descartan
+    // ── 2. Mapas normalizados ───────────────────────────────────────────
+    const userMap  = Object.fromEntries((users  || []).map(u => [normalizeBadge(u.badge_number), u.id]));
+    const siglaMap = Object.fromEntries((siglas || []).map(s => [s.code.trim().toUpperCase(), s]));
+
+    // ── 3. Construir lista de servicios a insertar ──────────────────────
+    const toInsert   = [];  // filas válidas para insertar
+    const sinUsuario = [];  // placas sin cuenta → se insertan igual (user_id null)
+    const sinSigla   = [];  // siglas desconocidas → se descartan
 
     for (const s of excelData) {
       const sigla = siglaMap[s.sigla_code];
-      if (!sigla) {
-        sinSigla.push(s.sigla_code);
-        continue;
-      }
+      if (!sigla) { sinSigla.push(s.sigla_code); continue; }
 
-      const userId = userMap[s.badge_number] || null;
+      const userId = userMap[s.badge_number] ?? null;
       if (!userId) sinUsuario.push(s.badge_number);
 
       toInsert.push({
-        user_id:         userId,           // null si aún no tiene cuenta
-        badge_number_raw: s.badge_number,  // siempre guardamos la placa
-        service_code_id: sigla.id,
-        date:            s.date,
-        service_type:    sigla.name,
-        start_time:      sigla.is_rest ? '00:00:00' : (sigla.start_time || '00:00:00'),
-        end_time:        sigla.is_rest ? '00:00:00' : (sigla.end_time || '00:00:00')
+        badge_number_raw: s.badge_number,          // siempre guardamos la placa
+        user_id:          userId,                   // null si no tiene cuenta aún
+        service_code_id:  sigla.id,
+        date:             s.date,
+        service_type:     sigla.name,
+        start_time:       sigla.is_rest ? '00:00:00' : (sigla.start_time || '00:00:00'),
+        end_time:         sigla.is_rest ? '00:00:00' : (sigla.end_time   || '00:00:00'),
       });
     }
 
     if (!toInsert.length) {
       hideLoading();
-      // Mostrar qué siglas fallaron para que el admin pueda corregir
-      const siglasUnicas = [...new Set(sinSigla)].slice(0, 10).join(', ');
-      showToast(`No hay servicios válidos. Siglas no reconocidas: ${siglasUnicas}`, 'error');
+      const desc = [...new Set(sinSigla)].slice(0, 8).join(', ');
+      showToast(`Sin servicios válidos. Siglas no reconocidas: ${desc || '—'}`, 'error');
       return;
     }
 
-    // ── 4. Borrar servicios previos solo de las combinaciones placa+fecha ──
-    // Se borran por badge_number_raw para no perder datos de usuarios existentes
-    // que NO estén en este Excel.
-    const badgesEnExcel = [...new Set(toInsert.map(s => s.badge_number_raw))];
-    const datesEnExcel  = [...new Set(toInsert.map(s => s.date))];
+    // ── 4. Borrar registros previos que serán reemplazados ──────────────
+    // Se identifican por badge_number_raw + fecha (no por user_id, que puede ser null)
+    const allBadges = [...new Set(toInsert.map(s => s.badge_number_raw))];
+    const allDates  = [...new Set(toInsert.map(s => s.date))];
 
-    // Borrar en lotes de 50 placas para no superar límites de URL
-    const LOTE = 50;
-    for (let i = 0; i < badgesEnExcel.length; i += LOTE) {
-      const lote = badgesEnExcel.slice(i, i + LOTE);
-      await supabase
+    // Borrar en lotes de 40 placas (evitar URLs largas)
+    const LOTE_DELETE = 40;
+    for (let i = 0; i < allBadges.length; i += LOTE_DELETE) {
+      const lote = allBadges.slice(i, i + LOTE_DELETE);
+      const { error: delErr } = await supabase
         .from('services')
         .delete()
         .in('badge_number_raw', lote)
-        .in('date', datesEnExcel);
+        .in('date', allDates);
+      if (delErr) console.warn('[Excel] Error borrando lote:', delErr.message);
     }
 
-    // ── 5. Insertar en lotes de 500 (límite Supabase) ──
+    // También borrar por user_id para usuarios que ya existían antes
+    // (sus registros anteriores pueden no tener badge_number_raw todavía)
+    const userIdsConServicios = [...new Set(
+      toInsert.filter(s => s.user_id).map(s => s.user_id)
+    )];
+    if (userIdsConServicios.length) {
+      const LOTE_UID = 40;
+      for (let i = 0; i < userIdsConServicios.length; i += LOTE_UID) {
+        const lote = userIdsConServicios.slice(i, i + LOTE_UID);
+        await supabase
+          .from('services')
+          .delete()
+          .in('user_id', lote)
+          .in('date', allDates);
+      }
+    }
+
+    // ── 5. Insertar en lotes de 500 ─────────────────────────────────────
     const BATCH = 500;
+    let insertados = 0;
     for (let i = 0; i < toInsert.length; i += BATCH) {
-      const { error } = await supabase.from('services').insert(toInsert.slice(i, i + BATCH));
-      if (error) throw error;
+      const lote = toInsert.slice(i, i + BATCH);
+      const { error: insErr } = await supabase.from('services').insert(lote);
+      if (insErr) throw new Error(`Error insertando lote ${i/BATCH + 1}: ${insErr.message} (code: ${insErr.code})`);
+      insertados += lote.length;
     }
 
-    // ── 6. Resultado ──
+    // ── 6. Resultado ─────────────────────────────────────────────────────
     hideLoading();
 
     const sinUsuarioUnicos = [...new Set(sinUsuario)];
     const siglasInvalidas  = [...new Set(sinSigla)];
+    const hayAdvertencias  = sinUsuarioUnicos.length || siglasInvalidas.length;
 
-    let msg = `✅ ${toInsert.length} servicios cargados correctamente.`;
-    if (sinUsuarioUnicos.length) {
-      msg += ` ${sinUsuarioUnicos.length} placa(s) sin usuario registrado (quedarán vinculadas al crear la cuenta).`;
-    }
-    if (siglasInvalidas.length) {
-      msg += ` ${siglasInvalidas.length} sigla(s) desconocidas omitidas.`;
-    }
+    let msg = `✅ ${insertados} servicios cargados.`;
+    if (sinUsuarioUnicos.length) msg += ` ${sinUsuarioUnicos.length} placa(s) sin cuenta (se vinculan al crear usuario).`;
+    if (siglasInvalidas.length)  msg += ` ${siglasInvalidas.length} sigla(s) desconocidas omitidas.`;
 
-    showToast(msg, sinUsuarioUnicos.length || siglasInvalidas.length ? 'warning' : 'success');
-
-    // Mostrar resumen detallado en consola
-    if (sinUsuarioUnicos.length) console.info('Placas sin usuario (se guardan igual):', sinUsuarioUnicos);
-    if (siglasInvalidas.length)  console.warn('Siglas no reconocidas (descartadas):', siglasInvalidas);
+    showToast(msg, hayAdvertencias ? 'warning' : 'success');
+    if (sinUsuarioUnicos.length) console.info('[Excel] Placas sin usuario:', sinUsuarioUnicos);
+    if (siglasInvalidas.length)  console.warn('[Excel] Siglas descartadas:', [...new Set(sinSigla)]);
 
     closeModal('excel-modal');
     document.getElementById('excel-preview').style.display = 'none';
@@ -675,7 +686,7 @@ async function confirmExcelUpload() {
   } catch (e) {
     hideLoading();
     console.error('Error carga Excel:', e);
-    showToast('Error al cargar servicios: ' + (e.message || 'Error desconocido'), 'error');
+    showToast('Error: ' + (e.message || 'Error desconocido'), 'error');
   }
 }
 
